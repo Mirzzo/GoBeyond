@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Serialization;
 using GoBeyond.API.Middleware;
 using GoBeyond.API.Utilities;
 using GoBeyond.Infrastructure.Database;
@@ -14,7 +15,12 @@ EnvLoader.Load(Path.Combine(Directory.GetCurrentDirectory(), ".env"));
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddGoBeyondInfrastructure(builder.Configuration);
 
