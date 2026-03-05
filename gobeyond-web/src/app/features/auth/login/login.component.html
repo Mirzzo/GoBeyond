@@ -1,0 +1,22 @@
+<section class="login-page">
+  <form [formGroup]="form" (ngSubmit)="submit()" class="login-card">
+    <h1>GoBeyond</h1>
+    <p>Sign in to admin or mentor panel</p>
+
+    <label>
+      Email
+      <input formControlName="email" type="email" placeholder="name@example.com" />
+    </label>
+
+    <label>
+      Password
+      <input formControlName="password" type="password" placeholder="Enter password" />
+    </label>
+
+    @if (errorMessage(); as error) {
+      <p class="error">{{ error }}</p>
+    }
+
+    <button type="submit" [disabled]="isSubmitting()">{{ isSubmitting() ? 'Loading...' : 'Login' }}</button>
+  </form>
+</section>

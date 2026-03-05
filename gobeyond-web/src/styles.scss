@@ -1,0 +1,21 @@
+:root {
+  --page-bg: #1a1a1a;
+  --card-bg: #2d2d2d;
+  --input-bg: #3a3a3a;
+  --accent-color: #ffd700;
+  --text-color: #ffffff;
+  --text-muted: #bdbdbd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--page-bg);
+  color: var(--text-color);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}

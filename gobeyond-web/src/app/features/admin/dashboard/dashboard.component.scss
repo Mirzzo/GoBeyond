@@ -1,0 +1,14 @@
+.panel-card {
+  background: var(--card-bg);
+  border: 1px solid rgba(255, 215, 0, 0.2);
+  border-radius: 0.8rem;
+  padding: 1rem;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+p {
+  color: var(--text-muted);
+}
