@@ -35,11 +35,20 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             .HasOne(x => x.User)
             .WithOne(x => x.MentorProfile)
             .HasForeignKey<MentorProfile>(x => x.UserId);
+        modelBuilder.Entity<MentorProfile>()
+            .Property(x => x.Price)
+            .HasPrecision(10, 2);
 
         modelBuilder.Entity<ClientProfile>()
             .HasOne(x => x.User)
             .WithOne(x => x.ClientProfile)
             .HasForeignKey<ClientProfile>(x => x.UserId);
+        modelBuilder.Entity<ClientProfile>()
+            .Property(x => x.Weight)
+            .HasPrecision(6, 2);
+        modelBuilder.Entity<ClientProfile>()
+            .Property(x => x.Height)
+            .HasPrecision(6, 2);
 
         modelBuilder.Entity<MentorCertificate>()
             .HasOne(x => x.MentorProfile)
@@ -92,6 +101,9 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             .HasOne(x => x.ClientProfile)
             .WithMany(x => x.ProgressEntries)
             .HasForeignKey(x => x.ClientProfileId);
+        modelBuilder.Entity<ProgressEntry>()
+            .Property(x => x.Weight)
+            .HasPrecision(6, 2);
 
         modelBuilder.Entity<Review>()
             .HasOne(x => x.ClientProfile)
@@ -114,6 +126,13 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             .HasOne(x => x.Subscription)
             .WithMany(x => x.Payments)
             .HasForeignKey(x => x.SubscriptionId);
+        modelBuilder.Entity<Payment>()
+            .Property(x => x.Amount)
+            .HasPrecision(10, 2);
+
+        modelBuilder.Entity<Subscription>()
+            .Property(x => x.AmountPaid)
+            .HasPrecision(10, 2);
 
         modelBuilder.Entity<RefreshToken>()
             .HasOne(x => x.User)

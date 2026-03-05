@@ -1,0 +1,58 @@
+version: '3.9'
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: gobeyond-sqlserver
+    environment:
+      ACCEPT_EULA: 'Y'
+      SA_PASSWORD: YourStrong!Passw0rd
+    ports:
+      - '1433:1433'
+    volumes:
+      - gobeyond-sqldata:/var/opt/mssql
+    networks:
+      - gobeyond-net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: gobeyond-rabbitmq
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    networks:
+      - gobeyond-net
+
+  api:
+    build:
+      context: .
+      dockerfile: GoBeyond.API/GoBeyond.API/Dockerfile
+    container_name: gobeyond-api
+    env_file:
+      - .env
+    ports:
+      - '5000:8080'
+    depends_on:
+      - sqlserver
+      - rabbitmq
+    networks:
+      - gobeyond-net
+
+  email-consumer:
+    build:
+      context: .
+      dockerfile: GoBeyond.API/GoBeyond.EmailConsumer/Dockerfile
+    container_name: gobeyond-email-consumer
+    env_file:
+      - .env
+    depends_on:
+      - rabbitmq
+    networks:
+      - gobeyond-net
+
+volumes:
+  gobeyond-sqldata:
+
+networks:
+  gobeyond-net:
+    driver: bridge
