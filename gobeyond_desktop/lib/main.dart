@@ -7,12 +7,7 @@ import 'presentation/screens/desktop_home_screen.dart';
 import 'presentation/screens/login_screen.dart';
 
 void main() {
-  runApp(
-    ChangeNotifierProvider(
-      create: (_) => SessionController(),
-      child: const GoBeyondDesktopApp(),
-    ),
-  );
+  runApp(const GoBeyondDesktopApp());
 }
 
 class GoBeyondDesktopApp extends StatelessWidget {
@@ -20,11 +15,14 @@ class GoBeyondDesktopApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'GoBeyond Desktop',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
-      home: const AppBootstrap(),
+    return ChangeNotifierProvider(
+      create: (_) => SessionController(),
+      child: MaterialApp(
+        title: 'GoBeyond Desktop',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.dark,
+        home: const AppBootstrap(),
+      ),
     );
   }
 }
