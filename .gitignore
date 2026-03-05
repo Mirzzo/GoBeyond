@@ -9,6 +9,7 @@ obj/
 node_modules/
 dist/
 .angular/
+gobeyond-web/
 
 # IDE
 .vs/
