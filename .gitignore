@@ -1,0 +1,21 @@
+GoBeyond-Plan.md
+init.md
+
+# .NET
+bin/
+obj/
+
+# Node/Angular
+node_modules/
+dist/
+.angular/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Logs and env
+*.log
+.env
