@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'panel_card.dart';
+import '../../widgets/panel_card.dart';
 
 class AdminMentorsScreen extends StatelessWidget {
   const AdminMentorsScreen({super.key});
@@ -14,3 +14,4 @@ class AdminMentorsScreen extends StatelessWidget {
     );
   }
 }
+

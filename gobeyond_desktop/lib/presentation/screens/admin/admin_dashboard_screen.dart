@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'panel_card.dart';
+import '../../widgets/panel_card.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
   const AdminDashboardScreen({super.key});
@@ -14,3 +14,4 @@ class AdminDashboardScreen extends StatelessWidget {
     );
   }
 }
+

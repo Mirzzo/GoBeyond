@@ -8,6 +8,10 @@ import 'admin/admin_dashboard_screen.dart';
 import 'admin/admin_mentor_requests_screen.dart';
 import 'admin/admin_mentors_screen.dart';
 import 'admin/admin_subscriptions_screen.dart';
+import 'mentor/mentor_collaboration_requests_screen.dart';
+import 'mentor/mentor_create_plan_screen.dart';
+import 'mentor/mentor_published_plans_screen.dart';
+import 'mentor/mentor_subscribers_screen.dart';
 
 class _PanelDestination {
   const _PanelDestination({
@@ -59,11 +63,38 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     ),
   ];
 
+  static const _mentorDestinations = <_PanelDestination>[
+    _PanelDestination(
+      label: 'Collaboration Requests',
+      icon: Icons.handshake,
+      page: MentorCollaborationRequestsScreen(),
+    ),
+    _PanelDestination(
+      label: 'Published Plans',
+      icon: Icons.task_alt,
+      page: MentorPublishedPlansScreen(),
+    ),
+    _PanelDestination(
+      label: 'Create Plan',
+      icon: Icons.calendar_view_week,
+      page: MentorCreatePlanScreen(),
+    ),
+    _PanelDestination(
+      label: 'Subscribers',
+      icon: Icons.people_alt,
+      page: MentorSubscribersScreen(),
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionController>();
+    final role = session.user?.role;
+    if (role == null) {
+      return const SizedBox.shrink();
+    }
 
-    if (session.user?.role != AppRole.admin) {
+    if (role == AppRole.client) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('GoBeyond Desktop'),
@@ -75,12 +106,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           ],
         ),
         body: const Center(
-          child: Text('Mentor panel will be enabled in next feature slice.'),
+          child: Text('Client role uses mobile app. Desktop panel supports Admin and Mentor roles.'),
         ),
       );
     }
 
-    final page = _adminDestinations[_selectedIndex].page;
+    final destinations = role == AppRole.admin ? _adminDestinations : _mentorDestinations;
+    if (_selectedIndex >= destinations.length) {
+      _selectedIndex = 0;
+    }
+    final page = destinations[_selectedIndex].page;
 
     return Scaffold(
       body: Row(
@@ -104,7 +139,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               ),
             ),
             destinations: [
-              for (final item in _adminDestinations)
+              for (final item in destinations)
                 NavigationRailDestination(
                   icon: Icon(item.icon),
                   label: Text(item.label, textAlign: TextAlign.center),
