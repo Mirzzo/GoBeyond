@@ -5,15 +5,15 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GoBeyond.API", "GoBeyond.API", "{C7840296-0271-8082-4669-51EE585352CC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.API", "GoBeyond.API\GoBeyond.API\GoBeyond.API.csproj", "{3DE6A81E-6867-459D-A909-2B03CA6D1C43}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.API", "GoBeyond.API\GoBeyond.API.csproj", "{3DE6A81E-6867-459D-A909-2B03CA6D1C43}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.Core", "GoBeyond.API\GoBeyond.Core\GoBeyond.Core.csproj", "{284AE341-0B03-4515-87CF-5310C7013483}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.Core", "GoBeyond.Core\GoBeyond.Core.csproj", "{284AE341-0B03-4515-87CF-5310C7013483}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.Infrastructure", "GoBeyond.API\GoBeyond.Infrastructure\GoBeyond.Infrastructure.csproj", "{485D1CFA-0D61-4AF9-9132-5996D2442326}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.Infrastructure", "GoBeyond.Infrastructure\GoBeyond.Infrastructure.csproj", "{485D1CFA-0D61-4AF9-9132-5996D2442326}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.Contracts", "GoBeyond.API\GoBeyond.Contracts\GoBeyond.Contracts.csproj", "{84A439EA-5E55-4376-BFAD-15DD896D0850}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.Contracts", "GoBeyond.Contracts\GoBeyond.Contracts.csproj", "{84A439EA-5E55-4376-BFAD-15DD896D0850}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.EmailConsumer", "GoBeyond.API\GoBeyond.EmailConsumer\GoBeyond.EmailConsumer.csproj", "{9EE0A18B-FA71-4D11-BD68-C1CA6A4E5166}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GoBeyond.EmailConsumer", "GoBeyond.EmailConsumer\GoBeyond.EmailConsumer.csproj", "{9EE0A18B-FA71-4D11-BD68-C1CA6A4E5166}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
