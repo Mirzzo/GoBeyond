@@ -12,6 +12,7 @@ import 'mentor/mentor_collaboration_requests_screen.dart';
 import 'mentor/mentor_create_plan_screen.dart';
 import 'mentor/mentor_published_plans_screen.dart';
 import 'mentor/mentor_subscribers_screen.dart';
+import 'user_profile_screen.dart';
 
 class _PanelDestination {
   const _PanelDestination({
@@ -166,8 +167,17 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                         style: TextStyle(color: Color(0xFFBDBDBD)),
                       ),
                       const Spacer(),
-                      Text(
-                        '${session.user?.role.name.toUpperCase()} | ${session.user?.name}',
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const UserProfileScreen(),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          '${session.user?.role.name.toUpperCase()} | ${session.user?.name}',
+                        ),
                       ),
                       const SizedBox(width: 12),
                       TextButton(

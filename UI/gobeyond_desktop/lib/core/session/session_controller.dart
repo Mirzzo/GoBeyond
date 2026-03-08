@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../models/auth_user.dart';
+import '../models/user_profile.dart';
 import '../network/api_client.dart';
 import '../services/auth_api_service.dart';
 
@@ -58,12 +59,7 @@ class SessionController extends ChangeNotifier {
       _accessToken = authResponse.accessToken;
       _user = authResponse.user;
 
-      final file = await _sessionFile();
-      final payload = {
-        _tokenKey: authResponse.accessToken,
-        _userKey: authResponse.user.toJson(),
-      };
-      await file.writeAsString(jsonEncode(payload), flush: true);
+      await _persistSession();
 
       notifyListeners();
       return true;
@@ -88,6 +84,20 @@ class SessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> syncUserFromProfile(UserProfile profile) async {
+    if (_user == null) {
+      return;
+    }
+
+    _user = _user!.copyWith(
+      name: profile.fullName,
+      email: profile.email,
+      role: profile.role,
+    );
+    await _persistSession();
+    notifyListeners();
+  }
+
   void clearError() {
     _errorMessage = null;
     notifyListeners();
@@ -96,6 +106,19 @@ class SessionController extends ChangeNotifier {
   void _setBusy(bool value) {
     _isBusy = value;
     notifyListeners();
+  }
+
+  Future<void> _persistSession() async {
+    if (_accessToken == null || _user == null) {
+      return;
+    }
+
+    final file = await _sessionFile();
+    final payload = {
+      _tokenKey: _accessToken,
+      _userKey: _user!.toJson(),
+    };
+    await file.writeAsString(jsonEncode(payload), flush: true);
   }
 
   Future<File> _sessionFile() async {

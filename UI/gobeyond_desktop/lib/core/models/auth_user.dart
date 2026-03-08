@@ -13,6 +13,20 @@ class AuthUser {
   final String email;
   final AppRole role;
 
+  AuthUser copyWith({
+    int? id,
+    String? name,
+    String? email,
+    AppRole? role,
+  }) {
+    return AuthUser(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      email: email ?? this.email,
+      role: role ?? this.role,
+    );
+  }
+
   factory AuthUser.fromJson(Map<String, dynamic> json) {
     return AuthUser(
       id: json['id'] as int,
