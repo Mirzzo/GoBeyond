@@ -14,7 +14,7 @@ class GoBeyondApp extends StatelessWidget {
     return MaterialApp(
       title: 'GoBeyond',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
+      theme: AppTheme.theme,
       home: const SplashScreen(),
     );
   }
