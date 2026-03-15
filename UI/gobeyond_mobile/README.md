@@ -1,17 +1,48 @@
-# gobeyond_mobile
+# GoBeyond Mobile (Client)
 
-A new Flutter project.
+Flutter mobile klijent za client flow u GoBeyond aplikaciji.
 
-## Getting Started
+## Prerequisites
 
-This project is a starting point for a Flutter application.
+- Flutter SDK
+- Pokrenut GoBeyond API na `http://localhost:5000` ili drugi URL proslijedjen preko `--dart-define`
 
-A few resources to get you started if this is your first Flutter project:
+## Run
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```powershell
+cd UI/gobeyond_mobile
+flutter pub get
+flutter run --dart-define=GO_BEYOND_API_URL=http://localhost:5000
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## API configuration
+
+Base URL koristi `GO_BEYOND_API_URL`.
+
+Default:
+- `http://localhost:5000`
+
+Definisano u:
+- `lib/core/constants/app_constants.dart`
+
+## Trenutno implementirano
+
+- Login i client register prema stvarnim auth endpointima
+- Persisted session i bootstrap preko auth scope-a
+- Mentor browse, search, filter i detail pregled
+- Recommendation flow prema `/api/mentors/recommended`
+- Questionnaire + subscription create flow
+- Payment confirmation/status pregled
+- Current subscription i current training plan pregled
+- Progress history + upload photo URL flow
+- Client profile edit i logout
+
+## Verification
+
+- `flutter analyze lib test` prolazi
+- `flutter test test/widget_test.dart` prolazi
+
+## Napomena
+
+- Mobile smoke test vise nije vezan za stari placeholder onboarding ekran.
+- API URL se ne hardkodira nego dolazi iz `--dart-define`.

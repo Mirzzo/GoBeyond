@@ -346,7 +346,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       ),
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
-                        value: _mentorCategory,
+                        initialValue: _mentorCategory,
                         items: const [
                           DropdownMenuItem(value: 'Weightlifting', child: Text('Weightlifting')),
                           DropdownMenuItem(value: 'Calisthenics', child: Text('Calisthenics')),

@@ -58,17 +58,17 @@ Swagger: `http://localhost:5000/swagger`
 ```powershell
 cd UI/gobeyond_desktop
 flutter pub get
-flutter run -d windows
+flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 ```
 
-Desktop API URL je trenutno postavljen na `http://localhost:5000`.
+Desktop API URL koristi `GO_BEYOND_API_URL` i po defaultu pada na `http://localhost:5000`.
 
 ## Run Flutter mobile
 
 ```powershell
 cd UI/gobeyond_mobile
 flutter pub get
-flutter run
+flutter run --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 ```
 
 ## Current implementation status (short)
@@ -79,11 +79,41 @@ flutter run
   - Desktop shell sa role-based navigacijom
   - User profile CRUD endpointi (`/api/user-profile/me`)
   - Desktop User Profile ekran + Save Changes flow
+  - Admin flow:
+    - mentor requests approve/reject
+    - mentors/clients/subscriptions list + search + role actions
+    - overview reporting + mentor drilldown + CSV export
+  - Mentor flow:
+    - collaboration requests
+    - subscribers + client detail
+    - create draft / publish training plan
+    - published plans pregled
+  - Mobile client flow:
+    - login/register + persisted session
+    - mentor browse/detail/recommendations
+    - questionnaire + subscription + payment confirmation
+    - current plan, progress history i profile edit
+  - DTO/mapper cleanup:
+    - `GoBeyond.Core.DTOs.Mvp` je flattenovan u `GoBeyond.Core.DTOs`
+    - `MvpDtos.cs` je zamijenjen sa `AppDtos.cs`
+    - `MvpMapper.cs` je zamijenjen sa `DtoMapper.cs`
+  - Domen endpointi za prijavljeni scope vise ne vracaju `501 Not Implemented`
+  - Flutter appovi koriste `--dart-define` za API base URL
 
 - Jos nije zavrseno:
-  - Vise domen endpointa je i dalje `501 Not Implemented`
-  - Dio desktop/mobile ekrana je placeholder
   - RabbitMQ consumer flow jos nije stvarno povezan na queue
+
+## Verification
+
+- Desktop:
+  - `flutter analyze lib test` prolazi
+  - `flutter test test/widget_test.dart` prolazi
+- Mobile:
+  - `flutter analyze lib test` prolazi
+  - `flutter test test/widget_test.dart` prolazi
+- Backend:
+  - kontroleri i DTO/mapper reference su uskladjeni nakon zadnjih rename promjena
+  - lokalni `dotnet build` i dalje moze pasti zbog ostecenog .NET 9 SDK/MSBuild okruzenja na masini, ne zbog prijavljenog compile error-a u repou
 
 ## Troubleshooting
 
@@ -101,5 +131,13 @@ cd UI/gobeyond_desktop
 flutter clean
 Remove-Item -Recurse -Force build\windows\x64 -ErrorAction SilentlyContinue
 flutter pub get
-flutter run -d windows
+flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 ```
+
+### .NET build pada bez jasne greske
+
+Ako `dotnet build` stane na `Determining projects to restore...` bez compiler error-a, provjeri lokalni .NET SDK/MSBuild install.
+
+Na ovoj masini je zabiljezen problem sa nedostajucim workload resolver folderima pod:
+- `C:\Program Files\dotnet\sdk\9.0.200\Sdks\Microsoft.NET.SDK.WorkloadAutoImportPropsLocator`
+- `C:\Program Files\dotnet\sdk\9.0.200\Sdks\Microsoft.NET.SDK.WorkloadManifestTargetsLocator`

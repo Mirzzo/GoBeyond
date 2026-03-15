@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/dio_client.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../demo/mobile_demo_data.dart';
+import '../../../data/models/training_plan_model.dart';
+import '../../../data/repositories/training_plan_repository.dart';
 import '../../widgets/app_panel.dart';
 import '../../widgets/section_header.dart';
 import 'training_detail_screen.dart';
@@ -14,12 +16,53 @@ class MyPlanScreen extends StatefulWidget {
 }
 
 class _MyPlanScreenState extends State<MyPlanScreen> {
+  final TrainingPlanRepository _repository = TrainingPlanRepository(DioClient());
+  TrainingPlanModel? _plan;
+  bool _isLoading = true;
+  String? _errorMessage;
   String _searchQuery = '';
 
-  List<PlanDay> get _filteredDays {
-    final normalizedQuery = _searchQuery.trim().toLowerCase();
+  @override
+  void initState() {
+    super.initState();
+    _loadPlan();
+  }
 
-    return MobileDemoData.planDays.where((day) {
+  Future<void> _loadPlan() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final plan = await _repository.getCurrentPlan();
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _plan = plan;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _errorMessage = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  List<PlanDayModel> get _filteredDays {
+    final normalizedQuery = _searchQuery.trim().toLowerCase();
+    final days = _plan?.days ?? const <PlanDayModel>[];
+
+    return days.where((day) {
       if (normalizedQuery.isEmpty) {
         return true;
       }
@@ -32,7 +75,7 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final plan = MobileDemoData.currentPlan;
+    final plan = _plan;
 
     return SafeArea(
       child: Padding(
@@ -49,139 +92,152 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
                   ),
             ),
             const SizedBox(height: 20),
-            AppPanel(
-              gradient: LinearGradient(
-                colors: [
-                  AppTheme.accentColor.withValues(alpha: 0.28),
-                  AppTheme.surfaceColor,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Week ${plan.weekNumber}', style: Theme.of(context).textTheme.labelLarge),
-                  const SizedBox(height: 10),
-                  Text(plan.focusTitle, style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 10),
-                  Text('"${plan.motivationalQuote}"'),
-                  const SizedBox(height: 16),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: plan.completionRate,
-                      minHeight: 10,
-                      backgroundColor: Colors.white.withValues(alpha: 0.08),
+            if (_isLoading)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else if (_errorMessage != null)
+              Expanded(
+                child: Center(
+                  child: Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                ),
+              )
+            else if (plan == null)
+              const Expanded(
+                child: Center(child: Text('No published plan is available yet.')),
+              )
+            else ...[
+              AppPanel(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.accentColor.withValues(alpha: 0.28),
+                    AppTheme.surfaceColor,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Week ${plan.weekNumber}', style: Theme.of(context).textTheme.labelLarge),
+                    const SizedBox(height: 10),
+                    Text(plan.focusTitle, style: Theme.of(context).textTheme.headlineMedium),
+                    const SizedBox(height: 10),
+                    Text('"${plan.motivationalQuote}"'),
+                    const SizedBox(height: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: plan.completionRate,
+                        minHeight: 10,
+                        backgroundColor: Colors.white.withValues(alpha: 0.08),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Next session: ${plan.nextSessionTitle} | ${plan.nextSessionDuration}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppTheme.textMutedColor,
-                        ),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    Text(
+                      'Next session: ${plan.nextSessionTitle} | ${plan.nextSessionDuration}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppTheme.textMutedColor,
+                          ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value;
-                });
-              },
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: 'Search sessions by day, focus or summary',
+              const SizedBox(height: 20),
+              TextField(
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value;
+                  });
+                },
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search_rounded),
+                  hintText: 'Search sessions by day, focus or summary',
+                ),
               ),
-            ),
-            const SizedBox(height: 18),
-            SectionHeader(
-              title: '${_filteredDays.length} sessions this week',
-              subtitle: 'Search is available here as well to satisfy filtered data browsing.',
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: ListView.separated(
-                itemCount: _filteredDays.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final day = _filteredDays[index];
+              const SizedBox(height: 18),
+              SectionHeader(
+                title: '${_filteredDays.length} sessions this week',
+                subtitle: 'Search is available here as well to satisfy filtered data browsing.',
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: _filteredDays.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final day = _filteredDays[index];
 
-                  return AppPanel(
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => TrainingDetailScreen(day: day),
-                        ),
-                      );
-                    },
-                    color: AppTheme.surfaceColor,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 52,
-                              height: 52,
-                              decoration: BoxDecoration(
-                                color: day.recovery
-                                    ? AppTheme.secondaryColor.withValues(alpha: 0.14)
-                                    : AppTheme.accentColor.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  day.dayLabel,
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                        color: day.recovery ? AppTheme.secondaryColor : AppTheme.accentColor,
-                                      ),
+                    return AppPanel(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => TrainingDetailScreen(day: day),
+                          ),
+                        );
+                      },
+                      color: AppTheme.surfaceColor,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: day.recovery
+                                      ? AppTheme.secondaryColor.withValues(alpha: 0.14)
+                                      : AppTheme.accentColor.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(18),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(day.title, style: Theme.of(context).textTheme.titleLarge),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    '${day.focus} | ${day.durationLabel}',
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                          color: AppTheme.textMutedColor,
+                                child: Center(
+                                  child: Text(
+                                    day.dayLabel,
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                          color: day.recovery ? AppTheme.secondaryColor : AppTheme.accentColor,
                                         ),
                                   ),
-                                ],
+                                ),
                               ),
-                            ),
-                            _StatusBadge(
-                              label: day.completed
-                                  ? 'Done'
-                                  : day.recovery
-                                      ? 'Recovery'
-                                      : 'Queued',
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        Text(day.summary),
-                        const SizedBox(height: 14),
-                        Text(
-                          day.mainBlocks.take(2).join(' | '),
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: AppTheme.textMutedColor,
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(day.title, style: Theme.of(context).textTheme.titleLarge),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '${day.focus} | ${day.durationLabel}',
+                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                            color: AppTheme.textMutedColor,
+                                          ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                              _StatusBadge(
+                                label: day.recovery ? 'Recovery' : 'Queued',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Text(day.summary),
+                          const SizedBox(height: 14),
+                          Text(
+                            day.mainBlocks.take(2).join(' | '),
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: AppTheme.textMutedColor,
+                                ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),

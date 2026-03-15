@@ -1,4 +1,7 @@
 class AppConstants {
-  static const baseUrl = 'https://localhost:5001';
+  static const baseUrl = String.fromEnvironment(
+    'GO_BEYOND_API_URL',
+    defaultValue: 'http://localhost:5000',
+  );
   static const defaultPlanPrice = 19.99;
 }

@@ -13,12 +13,14 @@ Flutter desktop klijent za GoBeyond admin i mentor panel.
 ```powershell
 cd UI/gobeyond_desktop
 flutter pub get
-flutter run -d windows
+flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 ```
 
 ## API configuration
 
-Base URL je trenutno:
+Base URL koristi `GO_BEYOND_API_URL`.
+
+Default:
 - `http://localhost:5000`
 
 Definisano u:
@@ -31,11 +33,22 @@ Definisano u:
 - Role-based desktop shell (Admin/Mentor)
 - Otvaranje User Profile ekrana klikom na user ime u top baru
 - User profile Save Changes flow prema `/api/user-profile/me`
+- Admin dashboard overview report + mentor report dialog + CSV export
+- Mentor requests screen sa approve/reject akcijama
+- Mentors, clients i subscriptions listing + search + block/delete/detail akcije
+- Mentor collaboration requests i subscribers pregled
+- Mentor create draft / publish plan flow
+- Mentor published plans pregled
 
-## Placeholder / u izradi
+## Verification
 
-- Vise admin i mentor dashboard ekrana je trenutno placeholder panel
-- Dio backend endpointa za te ekrane vraca `501 Not Implemented`
+- `flutter analyze lib test` prolazi
+- `flutter test test/widget_test.dart` prolazi
+
+## Napomena
+
+- Desktop MVP vise ne zavisi od placeholder panela ni `501` endpointa za glavne admin/mentor tokove.
+- API base URL dolazi iz `--dart-define`, tako da isti build moze gadjati i drugi backend bez izmjene koda.
 
 ## Troubleshooting
 
@@ -52,7 +65,7 @@ cd UI/gobeyond_desktop
 flutter clean
 Remove-Item -Recurse -Force build\windows\x64 -ErrorAction SilentlyContinue
 flutter pub get
-flutter run -d windows
+flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 ```
 
 ### Port 5000 already in use

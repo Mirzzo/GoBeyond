@@ -1,20 +1,66 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/dio_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/mentor_model.dart';
+import '../../../data/repositories/mentor_repository.dart';
 import '../../widgets/app_panel.dart';
 import '../../widgets/section_header.dart';
 import '../subscription/subscription_screen.dart';
 import 'questionnaire_screen.dart';
 
-class MentorDetailScreen extends StatelessWidget {
+class MentorDetailScreen extends StatefulWidget {
   const MentorDetailScreen({super.key, required this.mentor});
 
   final MentorModel mentor;
 
   @override
+  State<MentorDetailScreen> createState() => _MentorDetailScreenState();
+}
+
+class _MentorDetailScreenState extends State<MentorDetailScreen> {
+  final MentorRepository _repository = MentorRepository(DioClient());
+  List<Map<String, dynamic>> _reviews = const [];
+  bool _isLoadingReviews = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReviews();
+  }
+
+  Future<void> _loadReviews() async {
+    try {
+      final reviews = await _repository.getMentorReviews(widget.mentor.id);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _reviews = reviews;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _reviews = const [];
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingReviews = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final mentor = widget.mentor;
     final accentColor = Color(mentor.accentColorValue);
+    final reviewQuote = _reviews.isEmpty
+        ? mentor.reviewQuote
+        : _reviews.first['comment']?.toString() ?? mentor.reviewQuote;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Mentor profile')),
@@ -44,6 +90,7 @@ class MentorDetailScreen extends StatelessWidget {
                             child: Text(
                               mentor.name
                                   .split(' ')
+                                  .where((part) => part.isNotEmpty)
                                   .map((part) => part[0])
                                   .take(2)
                                   .join(),
@@ -142,7 +189,10 @@ class MentorDetailScreen extends StatelessWidget {
                             ),
                       ),
                       const SizedBox(height: 10),
-                      Text('"${mentor.reviewQuote}"'),
+                      if (_isLoadingReviews)
+                        const CircularProgressIndicator()
+                      else
+                        Text('"$reviewQuote"'),
                       const SizedBox(height: 12),
                       Text(
                         'Typical clients work in 4-8 week blocks with one primary focus per cycle.',

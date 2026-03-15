@@ -1,16 +1,57 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/dio_client.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../demo/mobile_demo_data.dart';
+import '../../../data/models/training_plan_model.dart';
+import '../../../data/repositories/progress_repository.dart';
 import '../../widgets/app_panel.dart';
 
-class TrainingDetailScreen extends StatelessWidget {
+class TrainingDetailScreen extends StatefulWidget {
   const TrainingDetailScreen({super.key, required this.day});
 
-  final PlanDay day;
+  final PlanDayModel day;
+
+  @override
+  State<TrainingDetailScreen> createState() => _TrainingDetailScreenState();
+}
+
+class _TrainingDetailScreenState extends State<TrainingDetailScreen> {
+  final ProgressRepository _progressRepository = ProgressRepository(DioClient());
+  bool _isBusy = false;
+
+  Future<void> _markReviewed() async {
+    setState(() => _isBusy = true);
+    try {
+      await _progressRepository.createProgressEntry({
+        'conditioning': 'Reviewed session: ${widget.day.title}',
+      });
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session review saved to progress history.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to save review: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final day = widget.day;
+
     return Scaffold(
       appBar: AppBar(title: Text(day.title)),
       body: ListView(
@@ -69,12 +110,14 @@ class TrainingDetailScreen extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Session marked as reviewed in UI demo.')),
-                );
-              },
-              child: const Text('Mark as reviewed'),
+              onPressed: _isBusy ? null : _markReviewed,
+              child: _isBusy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Mark as reviewed'),
             ),
           ),
         ],

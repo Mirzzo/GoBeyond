@@ -5,10 +5,14 @@ class PanelCard extends StatelessWidget {
     super.key,
     required this.title,
     required this.description,
+    this.actions,
+    this.child,
   });
 
   final String title;
   final String description;
+  final List<Widget>? actions;
+  final Widget? child;
 
   @override
   Widget build(BuildContext context) {
@@ -23,15 +27,26 @@ class PanelCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (actions != null) ...actions!,
+            ],
           ),
           const SizedBox(height: 10),
           Text(
             description,
             style: const TextStyle(color: Color(0xFFBDBDBD)),
           ),
+          if (child != null) ...[
+            const SizedBox(height: 20),
+            child!,
+          ],
         ],
       ),
     );

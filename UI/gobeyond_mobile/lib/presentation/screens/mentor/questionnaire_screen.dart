@@ -20,44 +20,50 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
   static const _questions = <_QuestionPrompt>[
     _QuestionPrompt(
       title: 'Primary goal',
-      subtitle: 'What should the next block solve first?',
+      subtitle: 'What should the next coaching block solve first?',
       options: ['Fat loss', 'Strength', 'Consistency', 'Technique'],
     ),
     _QuestionPrompt(
-      title: 'Training days',
-      subtitle: 'How many realistic training days fit your calendar?',
-      options: ['2 days', '3 days', '4 days', '5+ days'],
+      title: 'Time commitment',
+      subtitle: 'How much realistic time can you invest each week?',
+      options: ['2 short sessions', '3 sessions', '4 sessions', '5+ sessions'],
     ),
     _QuestionPrompt(
-      title: 'Equipment access',
-      subtitle: 'Choose the environment you can rely on every week.',
-      options: ['Full gym', 'Minimal gym', 'Home setup', 'Bodyweight only'],
+      title: 'Health issues',
+      subtitle: 'Choose the closest match for current limitations.',
+      options: ['None', 'Minor joint pain', 'Recovery issues', 'Need modifications'],
     ),
     _QuestionPrompt(
-      title: 'Recovery level',
-      subtitle: 'How recovered do you usually feel during the work week?',
-      options: ['Low', 'Mixed', 'Mostly good', 'Very good'],
+      title: 'Medications',
+      subtitle: 'Any regular medication or treatment to note?',
+      options: ['None', 'Occasional pain relief', 'Daily prescription', 'Prefer to explain later'],
     ),
     _QuestionPrompt(
-      title: 'Nutrition support',
-      subtitle: 'How much structure do you want around food habits?',
-      options: ['Minimal', 'Moderate', 'Detailed', 'Need full reset'],
+      title: 'Weekly availability',
+      subtitle: 'When can you most reliably train?',
+      options: ['Weekdays', 'Evenings', 'Weekends', 'Flexible'],
     ),
     _QuestionPrompt(
-      title: 'Coach communication',
-      subtitle: 'How often do you expect feedback or adjustments?',
-      options: ['Weekly', 'Twice weekly', 'As needed', 'Daily touchpoint'],
+      title: 'Physical activity level',
+      subtitle: 'How would you describe your current base level?',
+      options: ['Beginner', 'Intermediate', 'Advanced', 'Returning after break'],
     ),
   ];
 
   void _submit() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Questionnaire captured. Opening subscription flow.')),
-    );
-
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => SubscriptionScreen(mentor: widget.mentor),
+        builder: (_) => SubscriptionScreen(
+          mentor: widget.mentor,
+          questionnaireAnswers: {
+            'primaryGoal': _answers[0]!,
+            'timeCommitment': _answers[1]!,
+            'healthIssues': _answers[2]!,
+            'medications': _answers[3]!,
+            'weeklyAvailability': _answers[4]!,
+            'physicalActivityLevel': _answers[5]!,
+          },
+        ),
       ),
     );
   }
@@ -90,7 +96,7 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Answer all six prompts so the subscription flow can show a realistic coaching setup.',
+                  'Answer all six prompts so the subscription flow can create a real onboarding request.',
                 ),
                 const SizedBox(height: 16),
                 ClipRRect(
