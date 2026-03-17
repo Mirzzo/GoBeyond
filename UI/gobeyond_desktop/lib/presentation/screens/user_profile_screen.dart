@@ -84,10 +84,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Future<void> _loadProfile() async {
     final session = context.read<SessionController>();
-    final token = session.accessToken;
-    if (token == null) {
-      return;
-    }
 
     setState(() {
       _isLoading = true;
@@ -96,7 +92,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     });
 
     try {
-      final profile = await _profileApiService.getProfile(accessToken: token);
+      final profile = await session.runAuthenticated(
+        (token) => _profileApiService.getProfile(accessToken: token),
+      );
       _applyProfile(profile);
       await session.syncUserFromProfile(profile);
       if (!mounted) {
@@ -195,10 +193,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     }
 
     final session = context.read<SessionController>();
-    final token = session.accessToken;
-    if (token == null) {
-      return;
-    }
 
     setState(() {
       _isSaving = true;
@@ -208,7 +202,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
     try {
       final request = _buildRequest(_currentRole());
-      final profile = await requestBuilder(token, request);
+      final profile = await session.runAuthenticated(
+        (token) => requestBuilder(token, request),
+      );
       _applyProfile(profile);
       await session.syncUserFromProfile(profile);
       if (!mounted) {

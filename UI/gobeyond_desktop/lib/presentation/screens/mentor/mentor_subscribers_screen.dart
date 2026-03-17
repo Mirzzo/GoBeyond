@@ -33,10 +33,7 @@ class _MentorSubscribersScreenState extends State<MentorSubscribersScreen> {
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -44,9 +41,11 @@ class _MentorSubscribersScreenState extends State<MentorSubscribersScreen> {
     });
 
     try {
-      final items = await _service.getSubscribers(
-        token,
-        search: _searchController.text,
+      final items = await session.runAuthenticated(
+        (token) => _service.getSubscribers(
+          token,
+          search: _searchController.text,
+        ),
       );
       if (!mounted) {
         return;
@@ -71,14 +70,16 @@ class _MentorSubscribersScreenState extends State<MentorSubscribersScreen> {
   }
 
   Future<void> _showClientDetail(Map<String, dynamic> subscriber) async {
-    final token = context.read<SessionController>().accessToken;
+    final session = context.read<SessionController>();
     final clientUserId = subscriber['clientUserId'] as int?;
-    if (token == null || clientUserId == null) {
+    if (clientUserId == null) {
       return;
     }
 
     try {
-      final detail = await _service.getClientDetail(token, clientUserId);
+      final detail = await session.runAuthenticated(
+        (token) => _service.getClientDetail(token, clientUserId),
+      );
       if (!mounted) {
         return;
       }

@@ -11,7 +11,8 @@ public class FilesController(IWebHostEnvironment environment) : ControllerBase
 {
     [HttpPost("upload")]
     [RequestSizeLimit(10_000_000)]
-    public async Task<UploadedFileDto> Upload([FromForm] IFormFile file, CancellationToken cancellationToken)
+    [Consumes("multipart/form-data")]
+    public async Task<UploadedFileDto> Upload(IFormFile file, CancellationToken cancellationToken)
     {
         if (file.Length == 0)
         {

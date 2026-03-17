@@ -34,10 +34,7 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -45,7 +42,9 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
     });
 
     try {
-      final mentors = await _service.getMentors(token, search: _searchController.text);
+      final mentors = await session.runAuthenticated(
+        (token) => _service.getMentors(token, search: _searchController.text),
+      );
       if (!mounted) {
         return;
       }
@@ -71,14 +70,13 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
   }
 
   Future<void> _blockUser(int userId) async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() => _isMutating = true);
     try {
-      await _service.blockUser(token, userId);
+      await session.runAuthenticated(
+        (token) => _service.blockUser(token, userId),
+      );
       if (!mounted) {
         return;
       }
@@ -131,14 +129,13 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
       return;
     }
 
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() => _isMutating = true);
     try {
-      await _service.deleteUser(token, userId);
+      await session.runAuthenticated(
+        (token) => _service.deleteUser(token, userId),
+      );
       if (!mounted) {
         return;
       }
@@ -163,14 +160,16 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
   }
 
   Future<void> _showReport(Map<String, dynamic> mentor) async {
-    final token = context.read<SessionController>().accessToken;
+    final session = context.read<SessionController>();
     final profileId = mentor['profileId'] as int?;
-    if (token == null || profileId == null) {
+    if (profileId == null) {
       return;
     }
 
     try {
-      final report = await _service.getMentorReport(token, profileId);
+      final report = await session.runAuthenticated(
+        (token) => _service.getMentorReport(token, profileId),
+      );
       if (!mounted) {
         return;
       }

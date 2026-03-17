@@ -34,10 +34,7 @@ class _AdminMentorRequestsScreenState extends State<AdminMentorRequestsScreen> {
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -45,9 +42,11 @@ class _AdminMentorRequestsScreenState extends State<AdminMentorRequestsScreen> {
     });
 
     try {
-      final items = await _service.getMentorRequests(
-        token,
-        search: _searchController.text,
+      final items = await session.runAuthenticated(
+        (token) => _service.getMentorRequests(
+          token,
+          search: _searchController.text,
+        ),
       );
       if (!mounted) {
         return;
@@ -78,14 +77,11 @@ class _AdminMentorRequestsScreenState extends State<AdminMentorRequestsScreen> {
     int id,
     String message,
   ) async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() => _isMutating = true);
     try {
-      await action(token, id);
+      await session.runAuthenticated((token) => action(token, id));
       if (!mounted) {
         return;
       }

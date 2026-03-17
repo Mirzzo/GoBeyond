@@ -33,10 +33,7 @@ class _MentorPublishedPlansScreenState extends State<MentorPublishedPlansScreen>
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -44,10 +41,12 @@ class _MentorPublishedPlansScreenState extends State<MentorPublishedPlansScreen>
     });
 
     try {
-      final plans = await _service.getPlans(
-        token,
-        search: _searchController.text,
-        status: 'Published',
+      final plans = await session.runAuthenticated(
+        (token) => _service.getPlans(
+          token,
+          search: _searchController.text,
+          status: 'Published',
+        ),
       );
       if (!mounted) {
         return;
@@ -72,13 +71,12 @@ class _MentorPublishedPlansScreenState extends State<MentorPublishedPlansScreen>
   }
 
   Future<void> _showPlan(int planId) async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     try {
-      final detail = await _service.getPlanDetail(token, planId);
+      final detail = await session.runAuthenticated(
+        (token) => _service.getPlanDetail(token, planId),
+      );
       if (!mounted) {
         return;
       }

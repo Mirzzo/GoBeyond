@@ -29,10 +29,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -40,8 +37,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     });
 
     try {
-      final overview = await _service.getOverviewReport(token);
-      final mentors = await _service.getMentors(token);
+      final overview = await session.runAuthenticated(
+        (token) => _service.getOverviewReport(token),
+      );
+      final mentors = await session.runAuthenticated(
+        (token) => _service.getMentors(token),
+      );
 
       if (!mounted) {
         return;
@@ -182,14 +183,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _showMentorReport(Map<String, dynamic> mentor) async {
-    final token = context.read<SessionController>().accessToken;
+    final session = context.read<SessionController>();
     final profileId = mentor['profileId'] as int?;
-    if (token == null || profileId == null) {
+    if (profileId == null) {
       return;
     }
 
     try {
-      final report = await _service.getMentorReport(token, profileId);
+      final report = await session.runAuthenticated(
+        (token) => _service.getMentorReport(token, profileId),
+      );
       if (!mounted) {
         return;
       }

@@ -34,10 +34,7 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -45,7 +42,9 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
     });
 
     try {
-      final clients = await _service.getClients(token, search: _searchController.text);
+      final clients = await session.runAuthenticated(
+        (token) => _service.getClients(token, search: _searchController.text),
+      );
       if (!mounted) {
         return;
       }
@@ -69,14 +68,13 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
   }
 
   Future<void> _blockClient(int userId) async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() => _isMutating = true);
     try {
-      await _service.blockUser(token, userId);
+      await session.runAuthenticated(
+        (token) => _service.blockUser(token, userId),
+      );
       if (!mounted) {
         return;
       }
@@ -129,14 +127,13 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
       return;
     }
 
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() => _isMutating = true);
     try {
-      await _service.deleteUser(token, userId);
+      await session.runAuthenticated(
+        (token) => _service.deleteUser(token, userId),
+      );
       if (!mounted) {
         return;
       }

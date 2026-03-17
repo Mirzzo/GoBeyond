@@ -61,10 +61,7 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
   }
 
   Future<void> _loadRequests() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -72,7 +69,9 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
     });
 
     try {
-      final requests = await _service.getCollaborationRequests(token);
+      final requests = await session.runAuthenticated(
+        (token) => _service.getCollaborationRequests(token),
+      );
       if (!mounted) {
         return;
       }
@@ -104,8 +103,8 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
     }
 
     final subscriptionId = _selectedSubscriptionId;
-    final token = context.read<SessionController>().accessToken;
-    if (subscriptionId == null || token == null) {
+    final session = context.read<SessionController>();
+    if (subscriptionId == null) {
       return;
     }
 
@@ -119,9 +118,13 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      final createdPlan = await _service.createPlan(token, payload);
+      final createdPlan = await session.runAuthenticated(
+        (token) => _service.createPlan(token, payload),
+      );
       if (publishAfterSave) {
-        await _service.publishPlan(token, createdPlan['id'] as int);
+        await session.runAuthenticated(
+          (token) => _service.publishPlan(token, createdPlan['id'] as int),
+        );
       }
 
       if (!mounted) {

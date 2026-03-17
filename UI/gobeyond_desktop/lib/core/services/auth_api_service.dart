@@ -22,4 +22,20 @@ class AuthApiService {
 
     return AuthResponse.fromJson(payload);
   }
+
+  Future<AuthResponse> refresh({required String refreshToken}) async {
+    final response = await _client.dio.post<Map<String, dynamic>>(
+      '/api/auth/refresh',
+      data: {
+        'refreshToken': refreshToken,
+      },
+    );
+
+    final payload = response.data;
+    if (payload == null) {
+      throw Exception('Empty refresh response from server.');
+    }
+
+    return AuthResponse.fromJson(payload);
+  }
 }

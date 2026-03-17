@@ -34,10 +34,7 @@ class _MentorCollaborationRequestsScreenState extends State<MentorCollaborationR
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -45,9 +42,11 @@ class _MentorCollaborationRequestsScreenState extends State<MentorCollaborationR
     });
 
     try {
-      final items = await _service.getCollaborationRequests(
-        token,
-        search: _searchController.text,
+      final items = await session.runAuthenticated(
+        (token) => _service.getCollaborationRequests(
+          token,
+          search: _searchController.text,
+        ),
       );
       if (!mounted) {
         return;

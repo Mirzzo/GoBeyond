@@ -33,10 +33,7 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
   }
 
   Future<void> _load() async {
-    final token = context.read<SessionController>().accessToken;
-    if (token == null) {
-      return;
-    }
+    final session = context.read<SessionController>();
 
     setState(() {
       _isLoading = true;
@@ -44,9 +41,11 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
     });
 
     try {
-      final subscriptions = await _service.getSubscriptions(
-        token,
-        search: _searchController.text,
+      final subscriptions = await session.runAuthenticated(
+        (token) => _service.getSubscriptions(
+          token,
+          search: _searchController.text,
+        ),
       );
       if (!mounted) {
         return;
