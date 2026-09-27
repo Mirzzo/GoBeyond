@@ -39,12 +39,11 @@ public sealed class FileStorageService(IHostEnvironment environment, IOptions<Up
         var allowed = kind == UploadKind.Image ? settings.ImageExtensions : settings.CertificateExtensions;
         var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
         var allowedText = string.Join(", ", allowed);
-        var maxMb = settings.MaxFileSizeBytes / (1024 * 1024);
 
         if (file.Length <= 0)
             throw new ValidationException(fieldName, $"Fajl \"{file.FileName}\" je prazan.");
         if (file.Length > settings.MaxFileSizeBytes)
-            throw new ValidationException(fieldName, $"Fajl \"{file.FileName}\" je prevelik. Najveća dozvoljena veličina je {maxMb} MB.");
+            throw new ValidationException(fieldName, $"Fajl \"{file.FileName}\" je prevelik. Najveća dozvoljena veličina je {settings.MaxFileSizeText}.");
         if (!allowed.Contains(extension))
             throw new ValidationException(fieldName, $"Format fajla \"{file.FileName}\" nije dozvoljen. Dozvoljeni formati: {allowedText}.");
 

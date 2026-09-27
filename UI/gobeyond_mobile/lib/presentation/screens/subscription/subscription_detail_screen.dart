@@ -187,6 +187,8 @@ class _SubscriptionDetailBody extends StatelessWidget {
         return 'Neuspješno';
       case 'Refunded':
         return 'Refundirano';
+      case 'RefundPending':
+        return 'Povrat novca u obradi';
       default:
         return 'Na čekanju';
     }

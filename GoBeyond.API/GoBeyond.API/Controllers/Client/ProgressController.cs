@@ -37,7 +37,7 @@ public sealed class ProgressController(IProgressService progressService) : Contr
     [HttpPost("{year:int}/{month:int}/photo")]
     [Consumes("multipart/form-data")]
     public Task<ProgressEntryItemDto> UploadPhoto(int year, int month,
-        [Required(ErrorMessage = "Odaberite sliku napretka (JPG ili PNG, najviše 5 MB).")] IFormFile file,
+        [Required(ErrorMessage = "Odaberite sliku napretka (JPG ili PNG).")] IFormFile file,
         CancellationToken cancellationToken) =>
         progressService.UploadPhotoAsync(User.GetUserId(), year, month, file.ToFileUpload(), cancellationToken);
 

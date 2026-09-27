@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 using GoBeyond.Core.Exceptions;
+using GoBeyond.Infrastructure.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding.Metadata;
 
@@ -16,13 +18,14 @@ public static partial class ValidationResponseFactory
 
     public static IActionResult Create(ActionContext context)
     {
+        var uploads = context.HttpContext.RequestServices.GetRequiredService<IOptions<UploadOptions>>().Value;
         var errors = new Dictionary<string, string[]>();
         foreach (var (key, entry) in context.ModelState)
         {
             if (entry.Errors.Count == 0) continue;
             var field = ToCamelCasePath(key);
             var messages = entry.Errors
-                .Select(x => Translate(x.ErrorMessage, x.Exception))
+                .Select(x => Translate(x.ErrorMessage, x.Exception, uploads))
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct()
                 .ToArray();
@@ -33,7 +36,11 @@ public static partial class ValidationResponseFactory
         // Kad tijelo zahtjeva nije ispravan JSON, ASP.NET dodaje i grešku za cijeli parametar - dovoljna je konkretna greška.
         if (errors.Count > 1) errors.Remove("body");
 
-        return new BadRequestObjectResult(new ValidationErrorResponse(ValidationException.DefaultMessage, errors));
+        // Prevelik multipart zahtjev: poruka o veličini ide i kao glavna poruka (nije vezana za jedno polje).
+        var message = errors.Values.SelectMany(x => x).Contains(uploads.RequestTooLargeMessage)
+            ? uploads.RequestTooLargeMessage
+            : ValidationException.DefaultMessage;
+        return new BadRequestObjectResult(new ValidationErrorResponse(message, errors));
     }
 
     /// <summary>Bosanske poruke za greške model binding-a (npr. "abc" za broj).</summary>
@@ -61,9 +68,14 @@ public static partial class ValidationResponseFactory
             segment.Length == 0 ? segment : char.ToLowerInvariant(segment[0]) + segment[1..]));
     }
 
-    private static string Translate(string message, Exception? exception)
+    public static string Translate(string message, Exception? exception, UploadOptions uploads)
     {
         if (string.IsNullOrWhiteSpace(message)) return exception is null ? string.Empty : InvalidFormat;
+        // Kestrel/FormOptions limiti ("Failed to read the request form. ... limit ... exceeded / too large").
+        if (message.StartsWith("Failed to read the request form", StringComparison.Ordinal))
+            return message.Contains("exceeded", StringComparison.Ordinal) || message.Contains("too large", StringComparison.Ordinal)
+                ? uploads.RequestTooLargeMessage
+                : "Zahtjev nije ispravan multipart/form-data.";
         if (message.StartsWith("The JSON value", StringComparison.Ordinal) || message.Contains("Path: $", StringComparison.Ordinal) ||
             message.StartsWith("'", StringComparison.Ordinal) || message.Contains("JSON", StringComparison.Ordinal))
             return InvalidFormat;

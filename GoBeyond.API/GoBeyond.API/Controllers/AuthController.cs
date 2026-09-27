@@ -23,7 +23,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     public Task<AuthResponse> RegisterClient([FromBody] RegisterClientRequest request, CancellationToken cancellationToken) =>
         authService.RegisterClientAsync(request, cancellationToken);
 
-    /// <summary>multipart/form-data: podaci mentora + 1–5 certifikata (pdf/jpg/jpeg/png, ≤ 5 MB).</summary>
+    /// <summary>multipart/form-data: podaci mentora + certifikati (broj, formati i veličina iz sekcije Uploads u konfiguraciji).</summary>
     [HttpPost("register/mentor")]
     [AllowAnonymous]
     [Consumes("multipart/form-data")]

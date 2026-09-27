@@ -91,7 +91,7 @@ public sealed class AuthService(
         await accountValidator.ValidateAccountAsync(errors, request, null, cancellationToken);
         await accountValidator.ValidateMentorAsync(errors, request.TrainingTypeId, request.SpecializationIds, string.Empty, cancellationToken);
         errors.Require(certificates.Count >= 1 && certificates.Count <= maxCertificates, "certificates",
-            $"Priložite 1–{maxCertificates} certifikata (PDF, JPG ili PNG, najviše 5 MB po fajlu).");
+            uploadOptions.Value.CertificateCountMessage);
         errors.ThrowIfAny();
 
         foreach (var certificate in certificates)

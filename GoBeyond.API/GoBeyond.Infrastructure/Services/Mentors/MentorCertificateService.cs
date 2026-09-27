@@ -36,7 +36,7 @@ public sealed class MentorCertificateService(
     {
         var max = uploadOptions.Value.MaxCertificatesPerUpload;
         if (files.Count < 1 || files.Count > max)
-            throw new ValidationException("files", $"Priložite 1–{max} certifikata (PDF, JPG ili PNG, najviše 5 MB po fajlu).");
+            throw new ValidationException("files", uploadOptions.Value.CertificateCountMessage);
         foreach (var file in files) fileStorage.Validate(file, UploadKind.Certificate, "files");
 
         var mentor = await db.MentorProfiles.FirstOrDefaultAsync(x => x.UserId == mentorUserId, cancellationToken)

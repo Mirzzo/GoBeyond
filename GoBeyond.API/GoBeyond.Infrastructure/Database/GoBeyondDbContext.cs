@@ -161,6 +161,7 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             {
                 t.HasCheckConstraint("CK_ClientProfiles_WeightKg", "[WeightKg] BETWEEN 30 AND 300");
                 t.HasCheckConstraint("CK_ClientProfiles_HeightCm", "[HeightCm] BETWEEN 100 AND 250");
+                t.HasCheckConstraint("CK_ClientProfiles_TrainingExperienceYears", "[TrainingExperienceYears] BETWEEN 0 AND 60");
             });
         });
 
@@ -256,6 +257,8 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             {
                 t.HasCheckConstraint("CK_DayPlans_DayOfWeek", "[DayOfWeek] BETWEEN 1 AND 7");
                 t.HasCheckConstraint("CK_DayPlans_TrainingDuration", "[TrainingDurationMinutes] BETWEEN 1 AND 600");
+                t.HasCheckConstraint("CK_DayPlans_NutritionDuration",
+                    "[NutritionDurationMinutes] IS NULL OR [NutritionDurationMinutes] BETWEEN 1 AND 1440");
             });
         });
 

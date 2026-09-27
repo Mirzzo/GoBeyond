@@ -22,6 +22,7 @@ public interface IPaymentService
 /// <summary>
 /// Stripe plaćanje: klijent dobija client_secret za PaymentSheet, a backend tek nakon provjere
 /// PaymentIntent-a na Stripe-u (confirm ili potpisani webhook) označava uplatu uspješnom.
+/// Prije primjene se provjerava da PaymentIntent (metadata, iznos, valuta) odgovara uplati.
 /// Nema demo/lažnog načina plaćanja.
 /// </summary>
 public sealed class PaymentService(
@@ -33,7 +34,12 @@ public sealed class PaymentService(
 {
     public const string NotConfigured = "Stripe plaćanje nije konfigurisano na serveru.";
     public const string NotCompleted = "Plaćanje nije završeno. Pokušajte ponovo.";
-    private static readonly string[] ReusableIntentStatuses = ["requires_payment_method", "requires_confirmation", "requires_action"];
+    public const string StillProcessing = "Prethodno plaćanje se još obrađuje. Pokušajte ponovo za nekoliko trenutaka.";
+    public const string AlreadyPaid = "Ova uplata je već uspješno izvršena. Osvježite prikaz pretplate.";
+    public const string IntentMismatch = "Podaci o plaćanju na Stripe-u ne odgovaraju ovoj uplati, pa plaćanje nije primijenjeno. Kontaktirajte podršku.";
+
+    /// <summary>Stripe statusi u kojima klijent može (ponovo) pokušati plaćanje istim PaymentIntent-om.</summary>
+    public static readonly string[] ReusableIntentStatuses = ["requires_payment_method", "requires_confirmation", "requires_action"];
 
     public async Task<PaymentIntentDto> CreateIntentAsync(int clientUserId, CreatePaymentIntentRequest request,
         CancellationToken cancellationToken = default)
@@ -57,25 +63,46 @@ public sealed class PaymentService(
         if (mentor.User.IsDeleted || !mentor.User.IsActive || mentor.Status != MentorApprovalStatus.Approved)
             throw new ValidationException("Mentor trenutno nije dostupan, pa plaćanje nije moguće.");
 
-        // Ako postoji nedovršena uplata istog tipa, ponovo se koristi isti PaymentIntent.
-        var pending = subscription.Payments
-            .Where(x => x.Status == PaymentStatus.Pending && x.Purpose == purpose)
-            .OrderByDescending(x => x.CreatedAt)
-            .FirstOrDefault();
-        if (pending is not null)
+        var amountMinor = StripePaymentGateway.ToMinorUnits(subscription.Price);
+
+        // Nedovršena uplata istog tipa: ponovo se koristi isti PaymentIntent dok je to moguće.
+        foreach (var pending in subscription.Payments
+                     .Where(x => x.Status == PaymentStatus.Pending && x.Purpose == purpose)
+                     .OrderByDescending(x => x.CreatedAt).ToList())
         {
             var existing = await gateway.GetPaymentIntentAsync(pending.StripePaymentIntentId, cancellationToken);
-            if (ReusableIntentStatuses.Contains(existing.Status))
+            var reusable = ReusableIntentStatuses.Contains(existing.Status);
+
+            if (reusable && existing.AmountMinor == amountMinor)
                 return ToDto(pending, existing.ClientSecret);
-            pending.Status = PaymentStatus.Failed;
+
+            if (existing.Status == "succeeded")
+            {
+                // Uplata je prošla, a potvrda (confirm/webhook) još nije stigla - primijeni je sada.
+                await ApplySuccessAsync(pending, existing, cancellationToken);
+                throw new ConflictException(AlreadyPaid);
+            }
+
+            if (existing.Status == "canceled" || reusable)
+            {
+                // Otkazan PaymentIntent ili zastario iznos (mentor promijenio cijenu): stara uplata se zatvara.
+                pending.Status = PaymentStatus.Failed;
+                continue;
+            }
+
+            // processing, requires_capture ili nepoznat status: plaćanje još traje - ne kreirati drugo.
+            throw new ConflictException(StillProcessing);
         }
 
+        var attempt = subscription.Payments.Count(x => x.Purpose == purpose) + 1;
+        var idempotencyKey = string.Create(CultureInfo.InvariantCulture,
+            $"create-intent:{subscription.Id}:{purpose}:{attempt}:{amountMinor}");
         var intent = await gateway.CreatePaymentIntentAsync(subscription.Price, subscription.ClientProfile.User.Email,
             new Dictionary<string, string>
             {
-                ["subscriptionId"] = subscription.Id.ToString(CultureInfo.InvariantCulture),
-                ["purpose"] = purpose.ToString()
-            }, cancellationToken);
+                [PaymentIntentInfo.MetadataSubscriptionId] = subscription.Id.ToString(CultureInfo.InvariantCulture),
+                [PaymentIntentInfo.MetadataPurpose] = purpose.ToString()
+            }, idempotencyKey, cancellationToken);
 
         var payment = new Payment
         {
@@ -88,7 +115,18 @@ public sealed class PaymentService(
             CreatedAt = DateTime.UtcNow
         };
         db.Payments.Add(payment);
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Istovremeni zahtjev sa istim Idempotency-Key-om je već upisao ovaj PaymentIntent.
+            db.ChangeTracker.Clear();
+            var saved = await db.Payments.AsNoTracking().FirstOrDefaultAsync(x => x.StripePaymentIntentId == intent.Id, cancellationToken)
+                        ?? throw new ConflictException(StillProcessing);
+            return ToDto(saved, intent.ClientSecret);
+        }
         return ToDto(payment, intent.ClientSecret);
     }
 
@@ -98,14 +136,15 @@ public sealed class PaymentService(
             .FirstOrDefaultAsync(x => x.Id == paymentId && x.Subscription.ClientProfile.UserId == clientUserId, cancellationToken)
             ?? throw new NotFoundException("Uplata nije pronađena.");
 
-        if (payment.Status != PaymentStatus.Succeeded)
+        // Succeeded / Refunded / RefundPending su završna stanja - confirm je idempotentan.
+        if (payment.Status is PaymentStatus.Pending or PaymentStatus.Failed)
         {
             if (!gateway.IsConfigured) throw new ValidationException(NotConfigured);
             var intent = await gateway.GetPaymentIntentAsync(payment.StripePaymentIntentId, cancellationToken);
 
-            if (intent.Status != "succeeded" || intent.AmountMinor != StripePaymentGateway.ToMinorUnits(payment.Amount))
+            if (intent.Status != "succeeded")
             {
-                if (intent.Status == "canceled")
+                if (intent.Status == "canceled" && payment.Status == PaymentStatus.Pending)
                 {
                     payment.Status = PaymentStatus.Failed;
                     await db.SaveChangesAsync(cancellationToken);
@@ -113,7 +152,7 @@ public sealed class PaymentService(
                 throw new ValidationException(NotCompleted);
             }
 
-            await ApplySuccessAsync(payment, cancellationToken);
+            await ApplySuccessAsync(payment, intent, cancellationToken);
         }
 
         return await subscriptions.GetMineByIdAsync(clientUserId, payment.SubscriptionId, cancellationToken);
@@ -125,11 +164,12 @@ public sealed class PaymentService(
             throw new ValidationException("Stripe potpis webhook poziva nije ispravan.");
 
         using var json = JsonDocument.Parse(payload);
-        var type = json.RootElement.GetProperty("type").GetString();
-        var intentId = json.RootElement.GetProperty("data").GetProperty("object").GetProperty("id").GetString();
-        if (string.IsNullOrEmpty(intentId)) return;
+        var type = json.RootElement.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
+        if (!json.RootElement.TryGetProperty("data", out var data) || !data.TryGetProperty("object", out var obj)) return;
+        var intent = PaymentIntentInfo.FromJson(obj);
+        if (string.IsNullOrEmpty(intent.Id)) return;
 
-        var payment = await PaymentQuery().FirstOrDefaultAsync(x => x.StripePaymentIntentId == intentId, cancellationToken);
+        var payment = await PaymentQuery().FirstOrDefaultAsync(x => x.StripePaymentIntentId == intent.Id, cancellationToken);
         if (payment is null)
         {
             logger.LogInformation("Stripe webhook {Type} for unknown PaymentIntent ignored.", type);
@@ -138,8 +178,8 @@ public sealed class PaymentService(
 
         switch (type)
         {
-            case "payment_intent.succeeded":
-                await ApplySuccessAsync(payment, cancellationToken);
+            case "payment_intent.succeeded" when payment.Status is PaymentStatus.Pending or PaymentStatus.Failed:
+                await ApplySuccessAsync(payment, intent, cancellationToken);
                 break;
             case "payment_intent.payment_failed" or "payment_intent.canceled" when payment.Status == PaymentStatus.Pending:
                 payment.Status = PaymentStatus.Failed;
@@ -148,20 +188,45 @@ public sealed class PaymentService(
         }
     }
 
-    /// <summary>
-    /// Atomski "preuzima" uplatu (Pending → Succeeded samo jednom), pa confirm i webhook
-    /// koji stignu istovremeno ne mogu dvaput produžiti pretplatu.
-    /// </summary>
-    private async Task ApplySuccessAsync(Payment payment, CancellationToken cancellationToken)
+    /// <summary>Provjerava da Stripe PaymentIntent pripada ovoj uplati (metadata, iznos i valuta). Vraća opis razlike ili null.</summary>
+    public static string? FindMismatch(PaymentIntentInfo intent, Payment payment)
     {
+        if (!string.Equals(intent.Id, payment.StripePaymentIntentId, StringComparison.Ordinal))
+            return "PaymentIntent id";
+        if (!intent.Metadata.TryGetValue(PaymentIntentInfo.MetadataSubscriptionId, out var subscriptionId) ||
+            subscriptionId != payment.SubscriptionId.ToString(CultureInfo.InvariantCulture))
+            return "metadata.subscriptionId";
+        if (!intent.Metadata.TryGetValue(PaymentIntentInfo.MetadataPurpose, out var purpose) ||
+            !string.Equals(purpose, payment.Purpose.ToString(), StringComparison.Ordinal))
+            return "metadata.purpose";
+        if (intent.AmountMinor != StripePaymentGateway.ToMinorUnits(payment.Amount))
+            return "amount";
+        if (!string.Equals(intent.Currency, payment.Currency, StringComparison.OrdinalIgnoreCase))
+            return "currency";
+        return null;
+    }
+
+    /// <summary>
+    /// Provjeri PaymentIntent, pa atomski "preuzmi" uplatu (Pending/Failed → Succeeded samo jednom), tako da
+    /// confirm i webhook koji stignu istovremeno ne mogu dvaput primijeniti istu uplatu.
+    /// </summary>
+    private async Task ApplySuccessAsync(Payment payment, PaymentIntentInfo intent, CancellationToken cancellationToken)
+    {
+        if (FindMismatch(intent, payment) is { } field)
+        {
+            logger.LogError("PaymentIntent {IntentId} does not match payment {PaymentId} ({Field}); payment not applied.",
+                intent.Id, payment.Id, field);
+            throw new ValidationException(IntentMismatch);
+        }
+
         var now = DateTime.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var claimed = await db.Payments
-            .Where(x => x.Id == payment.Id && x.Status != PaymentStatus.Succeeded)
+            .Where(x => x.Id == payment.Id && (x.Status == PaymentStatus.Pending || x.Status == PaymentStatus.Failed))
             .ExecuteUpdateAsync(x => x.SetProperty(p => p.Status, PaymentStatus.Succeeded).SetProperty(p => p.PaidAt, now), cancellationToken);
         if (claimed == 0) return;
 
-        workflow.ApplySuccessfulPayment(payment, now);
+        await workflow.ApplySuccessfulPaymentAsync(payment, now, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace GoBeyond.Infrastructure.Services.Subscriptions;
 
-public sealed record LifecycleRunResult(int Expired, int ExpiringReminders, int PlanMissingReminders, int InactivityReminders);
+public sealed record LifecycleRunResult(int Expired, int ExpiringReminders, int PlanMissingReminders, int InactivityReminders, int RefundsCompleted);
 
 public interface ISubscriptionLifecycleProcessor
 {
@@ -34,9 +34,10 @@ public sealed class SubscriptionLifecycleProcessor(
             await ExpireAsync(now, cancellationToken),
             await RemindExpiringAsync(now, settings, cancellationToken),
             await RemindMissingPlansAsync(now, settings, cancellationToken),
-            await RemindInactiveClientsAsync(now, settings, cancellationToken));
+            await RemindInactiveClientsAsync(now, settings, cancellationToken),
+            await RetryPendingRefundsAsync(now, cancellationToken));
 
-        if (result != new LifecycleRunResult(0, 0, 0, 0))
+        if (result != new LifecycleRunResult(0, 0, 0, 0, 0))
             logger.LogInformation("Subscription lifecycle: {Result}", result);
         return result;
     }
@@ -125,6 +126,23 @@ public sealed class SubscriptionLifecycleProcessor(
         }
         await db.SaveChangesAsync(cancellationToken);
         return inactive.Count;
+    }
+
+    /// <summary>Ponovni pokušaj povrata za uplate koje nisu mogle biti primijenjene (status RefundPending).</summary>
+    private async Task<int> RetryPendingRefundsAsync(DateTime now, CancellationToken cancellationToken)
+    {
+        var pending = await db.Payments
+            .Include(x => x.Subscription).ThenInclude(x => x.ClientProfile).ThenInclude(x => x.User)
+            .Where(x => x.Status == PaymentStatus.RefundPending)
+            .ToListAsync(cancellationToken);
+
+        var completed = 0;
+        foreach (var payment in pending)
+        {
+            if (await workflow.RetryPendingRefundAsync(payment, now, cancellationToken)) completed++;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        return completed;
     }
 
     private IQueryable<Core.Entities.Subscription> SubscriptionsWithUsers() => db.Subscriptions

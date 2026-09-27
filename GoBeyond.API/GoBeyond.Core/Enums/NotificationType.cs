@@ -16,5 +16,6 @@ public enum NotificationType
     Inactivity = 12,
     NewMessage = 13,
     Announcement = 14,
-    PaymentSucceeded = 15
+    PaymentSucceeded = 15,
+    PaymentRefunded = 16
 }

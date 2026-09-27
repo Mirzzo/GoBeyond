@@ -1,5 +1,7 @@
 using GoBeyond.API.Validation;
 using GoBeyond.Core.Exceptions;
+using GoBeyond.Infrastructure.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace GoBeyond.API.Middleware;
 
@@ -7,7 +9,10 @@ namespace GoBeyond.API.Middleware;
 /// Mapira domenske izuzetke na HTTP status i jedinstven oblik odgovora iz API ugovora:
 /// 400 { message, errors }, 401/403/404/409 { message }, 500 { message }.
 /// </summary>
-public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
+public sealed class GlobalExceptionMiddleware(
+    RequestDelegate next,
+    IOptions<UploadOptions> uploadOptions,
+    ILogger<GlobalExceptionMiddleware> logger)
 {
     public const string ServerErrorMessage = "Došlo je do greške na serveru. Pokušajte ponovo.";
 
@@ -35,7 +40,7 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
         }
     }
 
-    private static (int Status, object Body) Map(Exception exception) => exception switch
+    private (int Status, object Body) Map(Exception exception) => exception switch
     {
         ValidationException ex when ex.Errors.Count > 0 =>
             (StatusCodes.Status400BadRequest, new ValidationErrorResponse(ex.Message, ex.Errors)),
@@ -46,7 +51,7 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
         UnauthorizedException ex => (StatusCodes.Status401Unauthorized, new ErrorResponse(ex.Message)),
         UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, new ErrorResponse(ErrorMessages.Unauthorized)),
         BadHttpRequestException ex when ex.StatusCode == StatusCodes.Status413PayloadTooLarge =>
-            (StatusCodes.Status400BadRequest, new ErrorResponse("Zahtjev je prevelik. Fajlovi mogu imati najviše 5 MB po fajlu.")),
+            (StatusCodes.Status400BadRequest, new ErrorResponse(uploadOptions.Value.RequestTooLargeMessage)),
         BadHttpRequestException => (StatusCodes.Status400BadRequest, new ErrorResponse("Zahtjev nije ispravnog formata.")),
         _ => (StatusCodes.Status500InternalServerError, new ErrorResponse(ServerErrorMessage))
     };

@@ -11,7 +11,6 @@ using GoBeyond.Infrastructure.Security;
 using GoBeyond.Infrastructure.Services.Subscriptions;
 using GoBeyond.Infrastructure.Services.Users;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace GoBeyond.Infrastructure.Services.Admin;
 
@@ -30,9 +29,10 @@ public sealed class AdminUserService(
     GoBeyondDbContext db,
     IUserAccountValidator accountValidator,
     IPasswordHasher passwordHasher,
-    ISubscriptionWorkflow workflow,
-    ILogger<AdminUserService> logger) : IAdminUserService
+    ISubscriptionWorkflow workflow) : IAdminUserService
 {
+    public const string DeleteRefundFailed = "Brisanje nije moguće: povrat uplate klijentu nije uspio. Pokušajte ponovo.";
+
     public async Task<List<AdminUserDto>> GetUsersAsync(AdminUserSearchObject search, CancellationToken cancellationToken = default)
     {
         var query = db.Users.AsNoTracking().Where(x => !x.IsDeleted);
@@ -138,7 +138,7 @@ public sealed class AdminUserService(
     /// <summary>
     /// Soft delete. Za mentora: sve započete/aktivne saradnje se prekidaju (klijent dobija obavijest,
     /// više se ništa ne naplaćuje ni obnavlja), a planovi ostaju dostupni klijentima samo za čitanje.
-    /// Uplate za neprihvaćene zahtjeve (AwaitingMentor) se vraćaju.
+    /// Uplate za neprihvaćene zahtjeve (AwaitingMentor) se vraćaju; ako povrat ne uspije, brisanje se ne izvršava.
     /// </summary>
     public async Task DeleteAsync(int adminUserId, int id, CancellationToken cancellationToken = default)
     {
@@ -165,17 +165,10 @@ public sealed class AdminUserService(
             var mentorRemoved = subscription.MentorProfile.UserId == id;
             if (subscription.Status == SubscriptionStatus.AwaitingMentor)
             {
-                foreach (var payment in subscription.Payments.Where(x => x.Status == PaymentStatus.Succeeded))
-                {
-                    try
-                    {
-                        await workflow.RefundAsync(payment, now, cancellationToken);
-                    }
-                    catch (ValidationException ex)
-                    {
-                        logger.LogWarning("Refund for payment {PaymentId} failed during user deletion: {Message}", payment.Id, ex.Message);
-                    }
-                }
+                // Neuspio povrat prekida brisanje (transakcija se poništava); ponovni pokušaj koristi isti
+                // Stripe Idempotency-Key, pa se već izvršeni povrat ne ponavlja.
+                foreach (var payment in subscription.Payments.Where(x => x.Status is PaymentStatus.Succeeded or PaymentStatus.RefundPending))
+                    await workflow.RefundOrFailAsync(payment, now, DeleteRefundFailed, cancellationToken);
             }
             workflow.Cancel(subscription,
                 mentorRemoved ? DomainTexts.MentorRemovedReason : DomainTexts.ClientRemovedReason,

@@ -10,17 +10,20 @@ using Microsoft.Extensions.Options;
 
 namespace GoBeyond.Infrastructure.Services.Payments;
 
-public sealed record PaymentIntentInfo(string Id, string ClientSecret, string Status, long AmountMinor, string Currency);
-
-/// <summary>Apstrakcija nad Stripe API-jem (PaymentIntents + Refunds + potpis webhook-a).</summary>
+/// <summary>
+/// Apstrakcija nad Stripe API-jem (PaymentIntents + Refunds + potpis webhook-a).
+/// Svaki POST šalje Idempotency-Key, pa ponovljen zahtjev (npr. nakon prekida mreže) ne kreira
+/// drugi PaymentIntent niti drugi povrat.
+/// </summary>
 public interface IPaymentGateway
 {
     bool IsConfigured { get; }
     string PublishableKey { get; }
     string Currency { get; }
-    Task<PaymentIntentInfo> CreatePaymentIntentAsync(decimal amount, string receiptEmail, IReadOnlyDictionary<string, string> metadata, CancellationToken cancellationToken);
+    Task<PaymentIntentInfo> CreatePaymentIntentAsync(decimal amount, string receiptEmail, IReadOnlyDictionary<string, string> metadata,
+        string idempotencyKey, CancellationToken cancellationToken);
     Task<PaymentIntentInfo> GetPaymentIntentAsync(string paymentIntentId, CancellationToken cancellationToken);
-    Task RefundAsync(string paymentIntentId, CancellationToken cancellationToken);
+    Task RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken);
     bool VerifyWebhookSignature(string payload, string signatureHeader, DateTimeOffset now);
 }
 
@@ -39,7 +42,7 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
     public string Currency => Settings.Currency.ToLowerInvariant();
 
     public async Task<PaymentIntentInfo> CreatePaymentIntentAsync(decimal amount, string receiptEmail,
-        IReadOnlyDictionary<string, string> metadata, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string> metadata, string idempotencyKey, CancellationToken cancellationToken)
     {
         var form = new Dictionary<string, string>
         {
@@ -50,20 +53,20 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
         };
         foreach (var (key, value) in metadata) form[$"metadata[{key}]"] = value;
 
-        using var request = CreateRequest(HttpMethod.Post, "payment_intents");
+        using var request = CreateRequest(HttpMethod.Post, "payment_intents", idempotencyKey);
         request.Content = new FormUrlEncodedContent(form);
         return ParseIntent(await SendAsync(request, cancellationToken));
     }
 
     public async Task<PaymentIntentInfo> GetPaymentIntentAsync(string paymentIntentId, CancellationToken cancellationToken)
     {
-        using var request = CreateRequest(HttpMethod.Get, $"payment_intents/{Uri.EscapeDataString(paymentIntentId)}");
+        using var request = CreateRequest(HttpMethod.Get, $"payment_intents/{Uri.EscapeDataString(paymentIntentId)}", idempotencyKey: null);
         return ParseIntent(await SendAsync(request, cancellationToken));
     }
 
-    public async Task RefundAsync(string paymentIntentId, CancellationToken cancellationToken)
+    public async Task RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken)
     {
-        using var request = CreateRequest(HttpMethod.Post, "refunds");
+        using var request = CreateRequest(HttpMethod.Post, "refunds", idempotencyKey);
         request.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["payment_intent"] = paymentIntentId });
         using var _ = await SendAsync(request, cancellationToken);
     }
@@ -101,13 +104,19 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
     public static long ToMinorUnits(decimal amount) =>
         checked((long)decimal.Round(amount * 100m, 0, MidpointRounding.AwayFromZero));
 
-    private HttpRequestMessage CreateRequest(HttpMethod method, string path)
+    private HttpRequestMessage CreateRequest(HttpMethod method, string path, string? idempotencyKey)
     {
         if (!IsConfigured)
             throw new ValidationException("Stripe plaćanje nije konfigurisano na serveru.");
 
         var request = new HttpRequestMessage(method, new Uri(new Uri(Settings.ApiBaseUrl), path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Settings.SecretKey);
+        if (method == HttpMethod.Post)
+        {
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                throw new ArgumentException("Svaki POST prema Stripe-u mora imati Idempotency-Key.", nameof(idempotencyKey));
+            request.Headers.Add("Idempotency-Key", idempotencyKey);
+        }
         return request;
     }
 
@@ -139,13 +148,7 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
         using (response)
         {
             using var json = JsonDocument.Parse(response.Content.ReadAsStream());
-            var data = json.RootElement;
-            return new PaymentIntentInfo(
-                data.GetProperty("id").GetString() ?? string.Empty,
-                data.TryGetProperty("client_secret", out var secret) ? secret.GetString() ?? string.Empty : string.Empty,
-                data.GetProperty("status").GetString() ?? string.Empty,
-                data.GetProperty("amount").GetInt64(),
-                data.GetProperty("currency").GetString() ?? string.Empty);
+            return PaymentIntentInfo.FromJson(json.RootElement);
         }
     }
 }

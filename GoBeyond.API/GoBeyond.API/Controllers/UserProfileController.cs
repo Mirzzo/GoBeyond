@@ -23,7 +23,7 @@ public sealed class UserProfileController(IUserProfileService profileService) : 
     [HttpPost("me/photo")]
     [Consumes("multipart/form-data")]
     public Task<ProfileImageResponse> UploadPhoto(
-        [Required(ErrorMessage = "Odaberite sliku (JPG ili PNG, najviše 5 MB).")] IFormFile file, CancellationToken cancellationToken) =>
+        [Required(ErrorMessage = "Odaberite sliku profila (JPG ili PNG).")] IFormFile file, CancellationToken cancellationToken) =>
         profileService.UploadPhotoAsync(User.GetUserId(), file.ToFileUpload(), cancellationToken);
 
     [HttpDelete("me/photo")]

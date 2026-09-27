@@ -14,7 +14,6 @@ public static class Policies
     public const string AdminOnly = nameof(AdminOnly);
     public const string MentorOnly = nameof(MentorOnly);
     public const string ClientOnly = nameof(ClientOnly);
-    public const string MentorOrAdmin = nameof(MentorOrAdmin);
 }
 
 public static class AuthenticationExtensions
@@ -84,8 +83,7 @@ public static class AuthenticationExtensions
         services.AddAuthorizationBuilder()
             .AddPolicy(Policies.AdminOnly, policy => policy.RequireRole("Admin"))
             .AddPolicy(Policies.MentorOnly, policy => policy.RequireRole("Mentor"))
-            .AddPolicy(Policies.ClientOnly, policy => policy.RequireRole("Client"))
-            .AddPolicy(Policies.MentorOrAdmin, policy => policy.RequireRole("Mentor", "Admin"));
+            .AddPolicy(Policies.ClientOnly, policy => policy.RequireRole("Client"));
 
         return services;
     }
