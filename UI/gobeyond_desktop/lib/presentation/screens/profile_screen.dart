@@ -12,6 +12,7 @@ import '../../core/utils/api_error.dart';
 import '../../core/utils/server_errors.dart';
 import '../../core/utils/validators.dart';
 import '../widgets/avatar.dart';
+import '../widgets/certificate_viewer.dart';
 import '../widgets/dialogs.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -251,6 +252,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) return;
       showErrorSnack(context, ApiError.from(error).message);
     }
+  }
+
+  Future<void> _previewCertificate(Map<String, dynamic> certificate) async {
+    final fileUrl = certificate['fileUrl'] as String?;
+    if (fileUrl == null) return;
+    await showGbDialog<void>(
+      context: context,
+      title: certificate['fileName'] as String? ?? 'Certifikat',
+      width: 640,
+      child: CertificateViewer(fileUrl: fileUrl, fileName: certificate['fileName'] as String? ?? ''),
+      actions: [ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ZATVORI'))],
+    );
   }
 
   Future<void> _deleteCertificate(Map<String, dynamic> certificate) async {
@@ -548,9 +561,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       leading: Icon(c['isVerified'] == true ? Icons.verified : Icons.description, color: AppColors.accent),
                                       title: Text(c['fileName'] as String? ?? ''),
                                       subtitle: Text(c['isVerified'] == true ? 'Verifikovan' : 'Nije verifikovan'),
-                                      trailing: IconButton(
-                                        icon: const Icon(Icons.delete_outline, color: AppColors.danger),
-                                        onPressed: () => _deleteCertificate(c),
+                                      onTap: () => _previewCertificate(c),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.visibility_outlined, color: AppColors.textMuted),
+                                            tooltip: 'Prikaži',
+                                            onPressed: () => _previewCertificate(c),
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                                            tooltip: 'Obriši',
+                                            onPressed: () => _deleteCertificate(c),
+                                          ),
+                                        ],
                                       ),
                                     )),
                               ],

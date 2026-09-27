@@ -1,15 +1,10 @@
-import 'dart:typed_data';
-
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
 
-import '../../../core/config/app_config.dart';
-import '../../../core/network/api_client.dart';
 import '../../../core/services/admin_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/api_error.dart';
 import '../../../core/utils/formatters.dart';
+import '../../widgets/certificate_viewer.dart';
 import '../../widgets/dialogs.dart';
 import '../../widgets/panel.dart';
 
@@ -228,12 +223,11 @@ class _CertificateViewer extends StatefulWidget {
 class _CertificateViewerState extends State<_CertificateViewer> {
   bool _expanded = false;
 
-  bool get _isPdf => (widget.certificate['fileUrl'] as String? ?? '').toLowerCase().endsWith('.pdf');
-
   @override
   Widget build(BuildContext context) {
     final certificate = widget.certificate;
-    final url = AppConfig.resolveUrl(certificate['fileUrl'] as String?);
+    final fileUrl = certificate['fileUrl'] as String?;
+    final fileName = certificate['fileName'] as String? ?? '';
     final isVerified = certificate['isVerified'] == true;
 
     return Container(
@@ -245,10 +239,10 @@ class _CertificateViewerState extends State<_CertificateViewer> {
         children: [
           Row(
             children: [
-              Icon(_isPdf ? Icons.picture_as_pdf : Icons.image, color: AppColors.accent),
+              Icon(fileName.toLowerCase().endsWith('.pdf') ? Icons.picture_as_pdf : Icons.image, color: AppColors.accent),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(certificate['fileName'] as String? ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                child: Text(fileName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
               ),
               StatusChip(
                 label: isVerified ? 'Verifikovan' : 'Nije verifikovan',
@@ -260,39 +254,12 @@ class _CertificateViewerState extends State<_CertificateViewer> {
                 TextButton(onPressed: widget.onVerify, child: const Text('Verifikuj certifikat')),
             ],
           ),
-          if (_expanded && url != null) ...[
+          if (_expanded && fileUrl != null) ...[
             const SizedBox(height: 12),
-            SizedBox(
-              height: 480,
-              child: _isPdf
-                  ? PdfPreview(
-                      build: (format) => _fetchBytes(url),
-                      canChangeOrientation: false,
-                      canChangePageFormat: false,
-                      canDebug: false,
-                      allowPrinting: false,
-                      allowSharing: false,
-                      useActions: false,
-                    )
-                  : Image.network(
-                      url,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Center(
-                        child: Text('Nije moguće učitati sliku.', style: TextStyle(color: AppColors.danger)),
-                      ),
-                    ),
-            ),
+            CertificateViewer(fileUrl: fileUrl, fileName: fileName),
           ],
         ],
       ),
     );
-  }
-
-  Future<Uint8List> _fetchBytes(String url) async {
-    final response = await ApiClient.instance.dio.get<List<int>>(
-      url,
-      options: Options(responseType: ResponseType.bytes),
-    );
-    return Uint8List.fromList(response.data ?? const []);
   }
 }
