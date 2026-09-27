@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/network/api_client.dart';
-import '../../../core/services/panel_api_service.dart';
-import '../../../core/session/session_controller.dart';
-import '../../widgets/panel_card.dart';
+import '../../../core/services/admin_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/api_error.dart';
+import '../../../core/utils/formatters.dart';
+import '../../widgets/dialogs.dart';
+import '../../widgets/panel.dart';
 
+const _statusOptions = ['PendingPayment', 'AwaitingMentor', 'Active', 'Rejected', 'Cancelled', 'Expired'];
+
+/// UPRAVLJANJE PRETPLATAMA.
 class AdminSubscriptionsScreen extends StatefulWidget {
   const AdminSubscriptionsScreen({super.key});
 
@@ -14,16 +18,16 @@ class AdminSubscriptionsScreen extends StatefulWidget {
 }
 
 class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
-  final PanelApiService _service = PanelApiService(ApiClient());
-  final TextEditingController _searchController = TextEditingController();
+  final _service = AdminService();
+  final _searchController = TextEditingController();
+  bool _loading = true;
   List<Map<String, dynamic>> _subscriptions = const [];
-  bool _isLoading = true;
-  String? _errorMessage;
+  String? _statusFilter;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _load();
   }
 
   @override
@@ -33,152 +37,155 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
   }
 
   Future<void> _load() async {
-    final session = context.read<SessionController>();
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+    setState(() => _loading = true);
     try {
-      final subscriptions = await session.runAuthenticated(
-        (token) => _service.getSubscriptions(
-          token,
-          search: _searchController.text,
-        ),
-      );
-      if (!mounted) {
-        return;
-      }
-
+      final subscriptions = await _service.getSubscriptions(search: _searchController.text, status: _statusFilter);
+      if (!mounted) return;
       setState(() {
         _subscriptions = subscriptions;
+        _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (!mounted) return;
+      setState(() => _loading = false);
+      showErrorSnack(context, ApiError.from(error).message);
     }
   }
 
-  void _showDetails(Map<String, dynamic> subscription) {
-    showDialog<void>(
+  Future<void> _openDetail(Map<String, dynamic> subscription) async {
+    final canCancel = subscription['status'] == 'PendingPayment' ||
+        subscription['status'] == 'AwaitingMentor' ||
+        subscription['status'] == 'Active';
+    await showGbDialog<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1F1F1F),
-          title: Text('Subscription #${subscription['id']}'),
-          content: SizedBox(
-            width: 460,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Client: ${subscription['clientName']}'),
-                Text('Mentor: ${subscription['mentorName']}'),
-                Text('Status: ${subscription['status']}'),
-                Text('Payment: ${subscription['paymentStatus']}'),
-                Text('Primary goal: ${subscription['primaryGoal']}'),
-                Text('Published plan: ${subscription['hasPublishedPlan'] == true ? 'Yes' : 'No'}'),
-                Text('Period: ${subscription['startDate']} -> ${subscription['endDate']}'),
-              ],
-            ),
+      title: '${subscription['clientFullName']} — ${subscription['mentorFullName']}',
+      width: 520,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _row('Klijent', subscription['clientFullName'] as String? ?? '-'),
+          _row('Mentor', subscription['mentorFullName'] as String? ?? '-'),
+          _row('Vrsta treninga', subscription['trainingTypeName'] as String? ?? '-'),
+          _row('Status', SubscriptionStatusPresentation.label(subscription['status'] as String? ?? '')),
+          _row('Cijena', Formatters.money(subscription['price'] as num?, currency: subscription['currency'] as String? ?? 'BAM')),
+          _row('Datum kreiranja', Formatters.date(subscription['createdAt'] as String?)),
+          _row('Početak', Formatters.date(subscription['startDate'] as String?)),
+          _row('Kraj', Formatters.date(subscription['endDate'] as String?)),
+          if ((subscription['statusReason'] as String?)?.isNotEmpty == true) _row('Napomena', subscription['statusReason'] as String),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zatvori')),
+        if (canCancel) ...[
+          const SizedBox(width: 8),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.of(context).pop();
+              _cancel(subscription);
+            },
+            child: const Text('OTKAŽI'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
+        ],
+      ],
     );
+  }
+
+  Widget _row(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 140, child: Text(label, style: const TextStyle(color: AppColors.textMuted))),
+          Expanded(child: Text(value, style: const TextStyle(color: Colors.white))),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _cancel(Map<String, dynamic> subscription) async {
+    final reason = await showReasonDialog(
+      context,
+      title: 'Otkaži pretplatu',
+      label: 'Razlog otkazivanja (5-300 znakova)',
+      minLength: 5,
+      maxLength: 300,
+      warning:
+          'Klijent (${subscription['clientFullName']}) i mentor (${subscription['mentorFullName']}) će biti obaviješteni o otkazivanju.',
+      confirmLabel: 'OTKAŽI',
+    );
+    if (reason == null) return;
+    try {
+      await _service.cancelSubscription(subscription['id'] as int, reason);
+      if (!mounted) return;
+      showSuccessSnack(context, 'Pretplata je otkazana.');
+      _load();
+    } catch (error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return PanelCard(
-      title: 'Manage Subscriptions',
-      description:
-          'The subscription list is API-backed with search and detail review for payment and plan status.',
-      actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
-      ],
+    return ContentPanel(
+      title: 'UPRAVLJANJE PRETPLATAMA',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _searchController,
-            onSubmitted: (_) => _load(),
-            decoration: InputDecoration(
-              hintText: 'Search subscriptions by client, mentor or status',
-              suffixIcon: IconButton(
-                onPressed: _load,
-                icon: const Icon(Icons.search_rounded),
+          Row(children: [
+            Expanded(child: SearchField(controller: _searchController, hintText: 'Pretraga po klijentu ili mentoru', onSubmitted: (_) => _load())),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 220,
+              child: DropdownButtonFormField<String?>(
+                initialValue: _statusFilter,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('Svi statusi')),
+                  ..._statusOptions.map((s) => DropdownMenuItem(value: s, child: Text(SubscriptionStatusPresentation.label(s)))),
+                ],
+                onChanged: (value) {
+                  setState(() => _statusFilter = value);
+                  _load();
+                },
               ),
             ),
-          ),
+          ]),
           const SizedBox(height: 16),
-          if (_isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_errorMessage != null)
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent),
-            )
-          else if (_subscriptions.isEmpty)
-            const Text('No subscriptions match the current search.')
-          else
-            ..._subscriptions.map(
-              (subscription) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F1F1F),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0x25FFD700)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${subscription['clientName']} -> ${subscription['mentorName']}',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${subscription['status']} • ${subscription['paymentStatus']}',
-                            style: const TextStyle(color: Color(0xFFBDBDBD)),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(subscription['primaryGoal']?.toString() ?? '-'),
-                        ],
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _subscriptions.isEmpty
+                    ? const EmptyState(message: 'Nema pretplata koje odgovaraju pretrazi.')
+                    : SingleChildScrollView(
+                        child: DataTable(
+                          columns: const [
+                            DataColumn(label: Text('Klijent')),
+                            DataColumn(label: Text('Mentor')),
+                            DataColumn(label: Text('Vrsta treninga')),
+                            DataColumn(label: Text('Status')),
+                            DataColumn(label: Text('Cijena')),
+                            DataColumn(label: Text('Period')),
+                            DataColumn(label: Text('')),
+                          ],
+                          rows: _subscriptions.map((subscription) {
+                            final status = subscription['status'] as String? ?? '';
+                            return DataRow(cells: [
+                              DataCell(Text(subscription['clientFullName'] as String? ?? '-')),
+                              DataCell(Text(subscription['mentorFullName'] as String? ?? '-')),
+                              DataCell(Text(subscription['trainingTypeName'] as String? ?? '-')),
+                              DataCell(StatusChip(label: SubscriptionStatusPresentation.label(status), color: SubscriptionStatusPresentation.color(status))),
+                              DataCell(Text(Formatters.money(subscription['price'] as num?, currency: subscription['currency'] as String? ?? 'BAM'))),
+                              DataCell(Text('${Formatters.date(subscription['startDate'] as String?)} - ${Formatters.date(subscription['endDate'] as String?)}')),
+                              DataCell(PillButton(label: 'DETALJI', dense: true, onPressed: () => _openDetail(subscription))),
+                            ]);
+                          }).toList(),
+                        ),
                       ),
-                    ),
-                    TextButton(
-                      onPressed: () => _showDetails(subscription),
-                      child: const Text('Details'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );

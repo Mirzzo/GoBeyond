@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../../../core/network/api_client.dart';
-import '../../../core/services/panel_api_service.dart';
-import '../../../core/session/session_controller.dart';
-import '../../widgets/panel_card.dart';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/reference_data_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/api_error.dart';
+import '../../widgets/dialogs.dart';
+import '../../widgets/panel.dart';
+import 'admin_mentor_request_detail_screen.dart';
 
+/// Mockup 01 — ZAHTJEVI ZA MENTORA.
 class AdminMentorRequestsScreen extends StatefulWidget {
   const AdminMentorRequestsScreen({super.key});
 
@@ -15,17 +17,21 @@ class AdminMentorRequestsScreen extends StatefulWidget {
 }
 
 class _AdminMentorRequestsScreenState extends State<AdminMentorRequestsScreen> {
-  final PanelApiService _service = PanelApiService(ApiClient());
-  final TextEditingController _searchController = TextEditingController();
+  final _service = AdminService();
+  final _referenceDataService = ReferenceDataService();
+  final _searchController = TextEditingController();
+  bool _loading = true;
   List<Map<String, dynamic>> _requests = const [];
-  bool _isLoading = true;
-  bool _isMutating = false;
-  String? _errorMessage;
+  List<Map<String, dynamic>> _trainingTypes = const [];
+  int? _trainingTypeFilter;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _referenceDataService.list(ReferenceResource.trainingTypes).then((value) {
+      if (mounted) setState(() => _trainingTypes = value);
+    });
+    _load();
   }
 
   @override
@@ -35,243 +41,99 @@ class _AdminMentorRequestsScreenState extends State<AdminMentorRequestsScreen> {
   }
 
   Future<void> _load() async {
-    final session = context.read<SessionController>();
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+    setState(() => _loading = true);
     try {
-      final items = await session.runAuthenticated(
-        (token) => _service.getMentorRequests(
-          token,
-          search: _searchController.text,
-        ),
+      final requests = await _service.getMentorRequests(
+        search: _searchController.text,
+        trainingTypeId: _trainingTypeFilter,
       );
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
-        _requests = items;
+        _requests = requests;
+        _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() => _loading = false);
+      showErrorSnack(context, ApiError.from(error).message);
     }
   }
 
-  Future<void> _handleAction(
-    Future<Map<String, dynamic>> Function(String token, int id) action,
-    int id,
-    String message,
-  ) async {
-    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
-      title: Text(message.contains('rejected') ? 'Reject mentor request?' : 'Approve mentor request?'),
-      content: const Text('This decision changes the mentor account status.'),
-      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Confirm'))],
-    ));
-    if (confirmed != true || !mounted) return;
-    final session = context.read<SessionController>();
-
-    setState(() => _isMutating = true);
-    try {
-      await session.runAuthenticated((token) => action(token, id));
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-      await _load();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Action failed: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
-  }
-
-  void _showCertificates(List<Map<String, dynamic>> certificates) {
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1F1F1F),
-          title: const Text('Certificates'),
-          content: SizedBox(
-            width: 420,
-            child: certificates.isEmpty
-                ? const Text('No certificates uploaded.')
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: certificates
-                        .map(
-                          (certificate) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: TextButton.icon(
-                              onPressed: () async {
-                                final uri = Uri.tryParse(certificate['fileUrl']?.toString() ?? '');
-                                if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
-                                  await launchUrl(uri);
-                                }
-                              },
-                              icon: const Icon(Icons.open_in_new),
-                              label: Text(certificate['fileName']?.toString() ?? 'Open certificate'),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
+  Future<void> _openDetail(Map<String, dynamic> request) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => AdminMentorRequestDetailScreen(mentorProfileId: request['mentorProfileId'] as int)),
     );
+    if (changed == true) _load();
   }
 
   @override
   Widget build(BuildContext context) {
-    return PanelCard(
-      title: 'Mentor Requests',
-      description:
-          'Pending mentor approvals now load from the API with certificate review and approve/reject actions.',
-      actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
-      ],
+    return ContentPanel(
+      title: 'ZAHTJEVI ZA MENTORA',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _searchController,
-            onSubmitted: (_) => _load(),
-            decoration: InputDecoration(
-              hintText: 'Search mentor requests',
-              suffixIcon: IconButton(
-                onPressed: _load,
-                icon: const Icon(Icons.search_rounded),
+          Row(children: [
+            Expanded(
+              child: SearchField(
+                controller: _searchController,
+                hintText: 'Pretraga po imenu i prezimenu',
+                onSubmitted: (_) => _load(),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          if (_isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 220,
+              child: DropdownButtonFormField<int?>(
+                initialValue: _trainingTypeFilter,
+                decoration: const InputDecoration(labelText: 'Vrsta treninga'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('Sve vrste treninga')),
+                  ..._trainingTypes.map((t) => DropdownMenuItem(value: t['id'] as int, child: Text(t['name'] as String))),
+                ],
+                onChanged: (value) {
+                  setState(() => _trainingTypeFilter = value);
+                  _load();
+                },
               ),
-            )
-          else if (_errorMessage != null)
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent),
-            )
-          else if (_requests.isEmpty)
-            const Text('No mentor requests match the current search.')
-          else
-            ..._requests.map(
-              (item) {
-                final certificates = (item['certificates'] as List<dynamic>? ?? const [])
-                    .whereType<Map<String, dynamic>>()
-                    .toList();
-
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1F1F1F),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0x25FFD700)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+          ]),
+          const SizedBox(height: 16),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _requests.isEmpty
+                    ? const EmptyState(message: 'Nema zahtjeva za mentorski nalog.')
+                    : ListView.separated(
+                        itemCount: _requests.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final request = _requests[index];
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                            decoration: BoxDecoration(color: AppColors.panelLight, borderRadius: BorderRadius.circular(14)),
+                            child: Row(
                               children: [
-                                Text(
-                                  item['fullName']?.toString() ?? '-',
-                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                                SizedBox(
+                                  width: 34,
+                                  child: Text('${index + 1}.', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${item['email']} • ${item['category']} • ${item['price']} BAM',
-                                  style: const TextStyle(color: Color(0xFFBDBDBD)),
+                                Expanded(
+                                  flex: 3,
+                                  child: Text(request['fullName'] as String? ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                                 ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text((request['trainingTypeName'] as String? ?? '').toUpperCase(),
+                                      style: const TextStyle(color: Colors.white)),
+                                ),
+                                PillButton(label: 'PREGLED..', onPressed: () => _openDetail(request)),
                               ],
                             ),
-                          ),
-                          TextButton(
-                            onPressed: () => _showCertificates(certificates),
-                            child: Text('Certificates (${item['certificateCount'] ?? 0})'),
-                          ),
-                        ],
+                          );
+                        },
                       ),
-                      const SizedBox(height: 10),
-                      Text(item['bio']?.toString() ?? ''),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: _isMutating
-                                  ? null
-                                  : () => _handleAction(
-                                        _service.rejectMentorRequest,
-                                        item['id'] as int,
-                                        'Mentor request rejected.',
-                                      ),
-                              child: const Text('Reject'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: _isMutating
-                                  ? null
-                                  : () => _handleAction(
-                                        _service.approveMentorRequest,
-                                        item['id'] as int,
-                                        'Mentor request approved.',
-                                      ),
-                              child: const Text('Approve'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+          ),
         ],
       ),
     );

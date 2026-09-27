@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/network/api_client.dart';
-import '../../../core/services/panel_api_service.dart';
-import '../../../core/session/session_controller.dart';
-import '../../widgets/panel_card.dart';
-import 'mentor_create_plan_screen.dart';
+import '../../../core/services/mentor_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/api_error.dart';
+import '../../widgets/dialogs.dart';
+import '../../widgets/panel.dart';
+import 'widgets/plan_builder_dialog.dart';
+import 'widgets/plan_view_dialog.dart';
 
+const _statusOptions = ['Draft', 'Published', 'Archived'];
+
+/// Mockup 06 — IZRAĐENI PLANOVI.
 class MentorPublishedPlansScreen extends StatefulWidget {
   const MentorPublishedPlansScreen({super.key});
 
@@ -15,16 +19,16 @@ class MentorPublishedPlansScreen extends StatefulWidget {
 }
 
 class _MentorPublishedPlansScreenState extends State<MentorPublishedPlansScreen> {
-  final PanelApiService _service = PanelApiService(ApiClient());
-  final TextEditingController _searchController = TextEditingController();
+  final _service = MentorService();
+  final _searchController = TextEditingController();
+  bool _loading = true;
   List<Map<String, dynamic>> _plans = const [];
-  bool _isLoading = true;
-  String? _errorMessage;
+  String? _statusFilter;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _load();
   }
 
   @override
@@ -34,184 +38,138 @@ class _MentorPublishedPlansScreenState extends State<MentorPublishedPlansScreen>
   }
 
   Future<void> _load() async {
-    final session = context.read<SessionController>();
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+    setState(() => _loading = true);
     try {
-      final plans = await session.runAuthenticated(
-        (token) => _service.getPlans(
-          token,
-          search: _searchController.text,
-          status: 'Published',
-        ),
-      );
-      if (!mounted) {
-        return;
-      }
-
+      final plans = await _service.getPlans(search: _searchController.text, status: _statusFilter);
+      if (!mounted) return;
       setState(() {
         _plans = plans;
+        _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (!mounted) return;
+      setState(() => _loading = false);
+      showErrorSnack(context, ApiError.from(error).message);
     }
   }
 
-  Future<void> _showPlan(int planId) async {
-    final session = context.read<SessionController>();
+  Future<void> _edit(Map<String, dynamic> plan) async {
+    final changed = await showPlanBuilderDialog(context, planId: plan['id'] as int, clientFullName: plan['clientFullName'] as String? ?? '');
+    if (changed == true) _load();
+  }
 
+  Future<void> _archive(Map<String, dynamic> plan) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Arhiviraj plan',
+      message: 'Da li želite arhivirati plan za ${plan['clientFullName']}? Klijent više neće moći bilježiti nove treninge dok plan ne bude ponovo objavljen.',
+      confirmLabel: 'ARHIVIRAJ',
+      danger: true,
+    );
+    if (!confirmed) return;
     try {
-      final detail = await session.runAuthenticated(
-        (token) => _service.getPlanDetail(token, planId),
-      );
-      if (!mounted) {
-        return;
-      }
-
-      final days = (detail['days'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .toList();
-
-      showDialog<void>(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1F1F1F),
-            title: Text('Week ${detail['weekNumber']} • ${detail['clientName']}'),
-            content: SizedBox(
-              width: 560,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(detail['motivationalQuote']?.toString() ?? ''),
-                  const SizedBox(height: 12),
-                  ...days.map(
-                    (day) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(
-                        '${day['dayOfWeek']}: ${day['trainingDescription']}',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          );
-        },
-      );
+      await _service.archivePlan(plan['id'] as int);
+      if (!mounted) return;
+      showSuccessSnack(context, 'Plan za ${plan['clientFullName']} je arhiviran.');
+      _load();
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
+    }
+  }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to open plan: $error')),
-      );
+  Future<void> _republish(Map<String, dynamic> plan) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Objavi plan ponovo',
+      message: 'Klijent (${plan['clientFullName']}) će biti obaviješten da je plan ponovo dostupan. Da li želite nastaviti?',
+      confirmLabel: 'OBJAVI PONOVO',
+    );
+    if (!confirmed) return;
+    try {
+      await _service.publishPlan(plan['id'] as int);
+      if (!mounted) return;
+      showSuccessSnack(context, 'Plan za ${plan['clientFullName']} je ponovo objavljen.');
+      _load();
+    } catch (error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return PanelCard(
-      title: 'Published Plans',
-      description:
-          'Published mentor plans are searchable by client name and open into a live plan preview.',
-      actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
-      ],
+    return ContentPanel(
+      title: 'IZRAĐENI PLANOVI',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _searchController,
-            onSubmitted: (_) => _load(),
-            decoration: InputDecoration(
-              hintText: 'Search plans by client or quote',
-              suffixIcon: IconButton(
-                onPressed: _load,
-                icon: const Icon(Icons.search_rounded),
+          Row(children: [
+            Expanded(child: SearchField(controller: _searchController, hintText: 'PRETRAŽI KLIJENTE', onSubmitted: (_) => _load())),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 200,
+              child: DropdownButtonFormField<String?>(
+                initialValue: _statusFilter,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('Svi statusi')),
+                  ..._statusOptions.map((s) => DropdownMenuItem(value: s, child: Text(PlanStatusPresentation.label(s)))),
+                ],
+                onChanged: (value) {
+                  setState(() => _statusFilter = value);
+                  _load();
+                },
               ),
             ),
-          ),
+          ]),
           const SizedBox(height: 16),
-          if (_isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_errorMessage != null)
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent),
-            )
-          else if (_plans.isEmpty)
-            const Text('No published plans match the current search.')
-          else
-            ..._plans.map(
-              (plan) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F1F1F),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0x25FFD700)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${plan['clientName']} • Week ${plan['weekNumber']}',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${plan['focusTitle']} • ${plan['dayCount']} day(s)',
-                            style: const TextStyle(color: Color(0xFFBDBDBD)),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(plan['motivationalQuote']?.toString() ?? ''),
-                        ],
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _plans.isEmpty
+                    ? const EmptyState(message: 'Nema izrađenih planova.')
+                    : ListView.separated(
+                        itemCount: _plans.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final plan = _plans[index];
+                          final status = plan['status'] as String? ?? '';
+                          final canEdit = plan['canEdit'] != false;
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                            decoration: BoxDecoration(color: AppColors.panelLight, borderRadius: BorderRadius.circular(14)),
+                            child: Row(
+                              children: [
+                                SizedBox(width: 34, child: Text('${index + 1}.', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                                Expanded(child: Text(plan['clientFullName'] as String? ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                                StatusChip(label: PlanStatusPresentation.label(status), color: PlanStatusPresentation.color(status)),
+                                const SizedBox(width: 10),
+                                Text('${plan['filledDays'] ?? 0}/7 dana', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                                const SizedBox(width: 12),
+                                PillButton(
+                                  label: 'PREGLED..',
+                                  onPressed: () => showPlanViewDialog(context, planId: plan['id'] as int, clientFullName: plan['clientFullName'] as String? ?? ''),
+                                ),
+                                const SizedBox(width: 10),
+                                Tooltip(
+                                  message: canEdit ? 'Uredi plan' : 'Pretplata više nije aktivna — plan se ne može uređivati.',
+                                  child: PillButton(label: 'UREDI PLAN', onPressed: canEdit ? () => _edit(plan) : null),
+                                ),
+                                if (status == 'Published') ...[
+                                  const SizedBox(width: 10),
+                                  PillButton(label: 'ARHIVIRAJ', color: AppColors.danger, onPressed: () => _archive(plan)),
+                                ],
+                                if (status == 'Archived' && canEdit) ...[
+                                  const SizedBox(width: 10),
+                                  PillButton(label: 'OBJAVI PONOVO', onPressed: () => _republish(plan)),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                    ),
-                    ElevatedButton(
-                      onPressed: () => _showPlan(plan['id'] as int),
-                      child: const Text('Open'),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton(onPressed: () async {
-                      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MentorCreatePlanScreen(editPlanId: plan['id'] as int)));
-                      if (mounted) await _load();
-                    }, child: const Text('Edit plan')),
-                  ],
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );

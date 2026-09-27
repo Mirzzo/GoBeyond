@@ -1,22 +1,20 @@
-enum AppRole { admin, mentor, client }
+/// Mirrors the backend `UserRole` enum (api-contract.md section 0): the JSON
+/// value is always the exact string `Admin` | `Mentor` | `Client`.
+enum AppRole {
+  admin('Admin', 'Administrator'),
+  mentor('Mentor', 'Mentor'),
+  client('Client', 'Klijent');
 
-extension AppRoleParser on AppRole {
-  static AppRole fromJsonValue(dynamic value) {
-    if (value is int) {
-      return switch (value) {
-        1 => AppRole.admin,
-        2 => AppRole.mentor,
-        3 => AppRole.client,
-        _ => AppRole.client,
-      };
-    }
+  const AppRole(this.wireValue, this.displayName);
 
-    final normalized = value?.toString().toLowerCase() ?? '';
-    return switch (normalized) {
-      'admin' => AppRole.admin,
-      'mentor' => AppRole.mentor,
-      'client' => AppRole.client,
-      _ => AppRole.client,
-    };
+  final String wireValue;
+  final String displayName;
+
+  static AppRole fromWire(dynamic value) {
+    final normalized = value?.toString() ?? '';
+    return AppRole.values.firstWhere(
+      (role) => role.wireValue == normalized,
+      orElse: () => AppRole.client,
+    );
   }
 }

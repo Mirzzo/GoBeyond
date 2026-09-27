@@ -1,100 +1,491 @@
+import 'dart:io';
+
+import 'package:dio/dio.dart' show MultipartFile;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/network/api_client.dart';
-import '../../core/services/auth_api_service.dart';
+import '../../core/services/auth_service.dart';
+import '../../core/services/reference_data_service.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/utils/api_error.dart';
+import '../../core/utils/server_errors.dart';
+import '../../core/utils/validators.dart';
+import '../widgets/dialogs.dart';
+
+const _allowedCertExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
+const _maxCertBytes = 5 * 1024 * 1024;
+const _maxCertCount = 5;
 
 class MentorRegisterScreen extends StatefulWidget {
   const MentorRegisterScreen({super.key});
+
   @override
   State<MentorRegisterScreen> createState() => _MentorRegisterScreenState();
 }
 
 class _MentorRegisterScreenState extends State<MentorRegisterScreen> {
-  final _service = AuthApiService(ApiClient());
-  final _form = GlobalKey<FormState>();
-  final _first = TextEditingController();
-  final _last = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _referenceDataService = ReferenceDataService();
+  final _authService = AuthService();
+  final _serverErrors = ServerErrors();
+
+  final _firstName = TextEditingController();
+  final _lastName = TextEditingController();
+  final _username = TextEditingController();
   final _email = TextEditingController();
-  final _password = TextEditingController();
+  final _phone = TextEditingController();
+  final _nickname = TextEditingController();
   final _bio = TextEditingController();
-  final _age = TextEditingController();
+  final _years = TextEditingController();
   final _price = TextEditingController();
-  PlatformFile? _certificate;
-  List<Map<String, dynamic>> _types = [];
-  int? _typeId;
-  bool _busy = false;
-  String? _error;
+  final _password = TextEditingController();
+  final _confirmPassword = TextEditingController();
+
+  DateTime? _dateOfBirth;
+  int? _genderId;
+  int? _trainingTypeId;
+  final Set<int> _specializationIds = {};
+  final List<_PickedCertificate> _certificates = [];
+
+  bool _loadingReference = true;
+  bool _submitting = false;
+  List<Map<String, dynamic>> _genders = const [];
+  List<Map<String, dynamic>> _trainingTypes = const [];
+  List<Map<String, dynamic>> _fitnessGoals = const [];
 
   @override
-  void initState() { super.initState(); _loadTypes(); }
-  @override
-  void dispose() { for (final c in [_first, _last, _email, _password, _bio, _age, _price]) { c.dispose(); } super.dispose(); }
-
-  Future<void> _loadTypes() async {
-    try {
-      final types = await _service.trainingTypes();
-      if (mounted) setState(() { _types = types; _typeId = types.isEmpty ? null : types.first['id'] as int; });
-    } catch (e) { if (mounted) setState(() => _error = 'Training types could not be loaded: $e'); }
+  void initState() {
+    super.initState();
+    _loadReferenceData();
   }
 
-  Future<void> _pickCertificate() async {
-    final selected = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg']);
-    if (selected == null || !mounted) return;
-    if ((await selected.length() ?? 0) > 10000000) { setState(() => _error = 'Certificate must be at most 10 MB.'); return; }
-    setState(() { _certificate = selected; _error = null; });
+  Future<void> _loadReferenceData() async {
+    try {
+      final results = await Future.wait([
+        _referenceDataService.list(ReferenceResource.genders),
+        _referenceDataService.list(ReferenceResource.trainingTypes),
+        _referenceDataService.list(ReferenceResource.fitnessGoals),
+      ]);
+      setState(() {
+        _genders = results[0];
+        _trainingTypes = results[1];
+        _fitnessGoals = results[2];
+        _loadingReference = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadingReference = false);
+      showErrorSnack(context, ApiError.from(error).message);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in [
+      _firstName, _lastName, _username, _email, _phone, _nickname, _bio, _years, _price, _password, _confirmPassword
+    ]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _pickDateOfBirth() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 25, now.month, now.day),
+      firstDate: DateTime(now.year - 90),
+      lastDate: DateTime(now.year - 16, now.month, now.day),
+      helpText: 'Odaberite datum rođenja',
+    );
+    if (picked != null) {
+      setState(() => _dateOfBirth = picked);
+    }
+  }
+
+  Future<void> _pickCertificates() async {
+    if (_certificates.length >= _maxCertCount) {
+      showErrorSnack(context, 'Maksimalno $_maxCertCount certifikata.');
+      return;
+    }
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: _allowedCertExtensions,
+    );
+    if (result.isEmpty || !mounted) return;
+
+    final remainingSlots = _maxCertCount - _certificates.length;
+    final accepted = <_PickedCertificate>[];
+    final rejected = <String>[];
+    for (final file in result.take(remainingSlots)) {
+      if (file.path == null) continue;
+      final size = File(file.path!).lengthSync();
+      if (size > _maxCertBytes) {
+        rejected.add('${file.name} (veći od 5 MB)');
+        continue;
+      }
+      accepted.add(_PickedCertificate(path: file.path!, name: file.name, sizeBytes: size));
+    }
+    setState(() => _certificates.addAll(accepted));
+    if (rejected.isNotEmpty) {
+      showErrorSnack(context, 'Odbačeni fajlovi: ${rejected.join(', ')}');
+    }
   }
 
   Future<void> _submit() async {
-    if (!_form.currentState!.validate()) return;
-    if (_certificate?.path == null) { setState(() => _error = 'Choose a PDF or image certificate.'); return; }
-    if (_typeId == null) { setState(() => _error = 'Choose a training type.'); return; }
-    setState(() { _busy = true; _error = null; });
-    try {
-      final certificate = await _service.uploadMentorCertificate(_certificate!.path!, _certificate!.name);
-      final selectedType = _types.firstWhere((v) => v['id'] == _typeId);
-      final categoryName = selectedType['name']?.toString() ?? 'Hybrid';
-      await _service.registerMentor({
-        'firstName': _first.text.trim(), 'lastName': _last.text.trim(), 'email': _email.text.trim(),
-        'password': _password.text, 'bio': _bio.text.trim(), 'age': int.parse(_age.text.trim()),
-        'category': const ['Weightlifting', 'Calisthenics', 'Hybrid'].contains(categoryName) ? categoryName : 'Hybrid',
-        'trainingTypeId': _typeId, 'price': double.parse(_price.text.trim().replaceAll(',', '.')),
-        'certificateFileName': certificate['fileName'], 'certificateFileUrl': certificate['url'],
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registration submitted. An administrator will review your certificate.')));
-        Navigator.pop(context);
+    _serverErrors.clear();
+    final formValid = _formKey.currentState!.validate();
+    final missing = <String>[];
+    if (_dateOfBirth == null) missing.add('Datum rođenja');
+    if (_genderId == null) missing.add('Spol');
+    if (_trainingTypeId == null) missing.add('Vrsta treninga');
+    if (_specializationIds.isEmpty) missing.add('Specijalizacije');
+    if (_certificates.isEmpty) missing.add('Certifikati');
+
+    if (!formValid || missing.isNotEmpty) {
+      setState(() {});
+      if (missing.isNotEmpty) {
+        showErrorSnack(context, 'Popunite obavezna polja: ${missing.join(', ')}.');
       }
-    } catch (e) { if (mounted) setState(() => _error = 'Registration failed: $e'); }
-    finally { if (mounted) setState(() => _busy = false); }
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      final dob = _dateOfBirth!;
+      final dobString =
+          '${dob.year.toString().padLeft(4, '0')}-${dob.month.toString().padLeft(2, '0')}-${dob.day.toString().padLeft(2, '0')}';
+
+      final certificates = await Future.wait(
+        _certificates.map((c) => MultipartFile.fromFile(c.path, filename: c.name)),
+      );
+
+      final message = await _authService.registerMentor(
+        fields: {
+          'firstName': _firstName.text.trim(),
+          'lastName': _lastName.text.trim(),
+          'username': _username.text.trim(),
+          'email': _email.text.trim(),
+          if (_phone.text.trim().isNotEmpty) 'phoneNumber': _phone.text.trim(),
+          'dateOfBirth': dobString,
+          'genderId': _genderId.toString(),
+          'password': _password.text,
+          'confirmPassword': _confirmPassword.text,
+          'trainingTypeId': _trainingTypeId.toString(),
+          if (_nickname.text.trim().isNotEmpty) 'nickname': _nickname.text.trim(),
+          'bio': _bio.text.trim(),
+          'yearsOfExperience': _years.text.trim(),
+          'monthlyPrice': _price.text.trim(),
+        },
+        specializationIds: _specializationIds.toList(),
+        certificates: certificates,
+      );
+
+      if (!mounted) return;
+      await showGbDialog<void>(
+        context: context,
+        title: 'Registracija poslana',
+        barrierDismissible: false,
+        child: Text(message, style: const TextStyle(color: Colors.white, fontSize: 15)),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pop();
+            },
+            child: const Text('U redu'),
+          ),
+        ],
+      );
+    } catch (error) {
+      final apiError = ApiError.from(error, fallback: 'Registracija nije uspjela. Pokušajte ponovo.');
+      setState(() => _serverErrors.apply(apiError.fieldErrors));
+      _formKey.currentState!.validate();
+      if (mounted) showErrorSnack(context, apiError.message);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Mentor registration')),
-    body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 600), child: SingleChildScrollView(
-      padding: const EdgeInsets.all(24), child: Form(key: _form, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Text('Create mentor account', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        TextFormField(controller: _first, decoration: const InputDecoration(labelText: 'First name'), validator: _name),
-        TextFormField(controller: _last, decoration: const InputDecoration(labelText: 'Last name'), validator: _name),
-        TextFormField(controller: _email, decoration: const InputDecoration(labelText: 'Email'), validator: (v) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(v?.trim() ?? '') ? null : 'Enter a valid email address.'),
-        TextFormField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Password'), validator: (v) => (v?.length ?? 0) < 8 ? 'Use at least 8 characters.' : null),
-        TextFormField(controller: _age, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Age'), validator: (v) { final n = int.tryParse(v ?? ''); return n == null || n < 18 || n > 100 ? 'Use an age from 18 to 100.' : null; }),
-        TextFormField(controller: _price, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Monthly price (BAM)'), validator: (v) { final n = double.tryParse((v ?? '').replaceAll(',', '.')); return n == null || n <= 0 || n > 10000 ? 'Use a price from 0.01 to 10000 BAM.' : null; }),
-        DropdownButtonFormField<int>(initialValue: _typeId, decoration: const InputDecoration(labelText: 'Training type'),
-          items: _types.map((v) => DropdownMenuItem(value: v['id'] as int, child: Text(v['name']?.toString() ?? ''))).toList(),
-          onChanged: (v) => setState(() => _typeId = v), validator: (v) => v == null ? 'Select a training type.' : null),
-        TextFormField(controller: _bio, maxLines: 3, decoration: const InputDecoration(labelText: 'Biography'), validator: (v) => (v?.trim().length ?? 0) < 20 ? 'Describe your experience in at least 20 characters.' : null),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(onPressed: _busy ? null : _pickCertificate, icon: const Icon(Icons.attach_file), label: Text(_certificate?.name ?? 'Choose certificate (PDF or image)')),
-        if (_certificate != null) Text('Selected: ${_certificate!.name}'),
-        if (_error != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error!, style: const TextStyle(color: Colors.redAccent))),
-        const SizedBox(height: 20),
-        FilledButton(onPressed: _busy ? null : _submit, child: Text(_busy ? 'Submitting...' : 'Submit registration')),
-      ])),
-    ))),
-  );
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Registracija mentora'),
+        backgroundColor: AppColors.panel,
+      ),
+      body: _loadingReference
+          ? const Center(child: CircularProgressIndicator())
+          : Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Container(
+                    padding: const EdgeInsets.all(28),
+                    decoration: BoxDecoration(color: AppColors.panel, borderRadius: BorderRadius.circular(20)),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Podaci o korisniku',
+                              style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 18)),
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _firstName,
+                                decoration: const InputDecoration(labelText: 'Ime'),
+                                validator: _serverErrors.wrap(
+                                    'firstName', (v) => Validators.lengthRange(v, 2, 50, label: 'Ime')),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _lastName,
+                                decoration: const InputDecoration(labelText: 'Prezime'),
+                                validator: _serverErrors.wrap(
+                                    'lastName', (v) => Validators.lengthRange(v, 2, 50, label: 'Prezime')),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _username,
+                                decoration: const InputDecoration(labelText: 'Korisničko ime'),
+                                validator: _serverErrors.wrap('username', Validators.username),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _email,
+                                decoration: const InputDecoration(labelText: 'Email'),
+                                validator: _serverErrors.wrap('email', Validators.email),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _phone,
+                                decoration: const InputDecoration(labelText: 'Telefon (opciono)'),
+                                validator: _serverErrors.wrap('phoneNumber', (v) => Validators.phone(v)),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: FormField<DateTime>(
+                                initialValue: _dateOfBirth,
+                                validator: (value) =>
+                                    _serverErrors.forField('dateOfBirth') ?? (value == null ? 'Datum rođenja je obavezan.' : null),
+                                builder: (state) => InkWell(
+                                  onTap: () async {
+                                    await _pickDateOfBirth();
+                                    state.didChange(_dateOfBirth);
+                                  },
+                                  child: InputDecorator(
+                                    decoration: InputDecoration(
+                                      labelText: 'Datum rođenja',
+                                      errorText: state.errorText,
+                                      suffixIcon: const Icon(Icons.calendar_today, size: 18),
+                                    ),
+                                    child: Text(
+                                      _dateOfBirth == null
+                                          ? 'Odaberite datum'
+                                          : '${_dateOfBirth!.day.toString().padLeft(2, '0')}.${_dateOfBirth!.month.toString().padLeft(2, '0')}.${_dateOfBirth!.year}.',
+                                      style: TextStyle(color: _dateOfBirth == null ? AppColors.textMuted : Colors.white),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 16),
+                          DropdownButtonFormField<int>(
+                            initialValue: _genderId,
+                            decoration: const InputDecoration(labelText: 'Spol'),
+                            items: _genders
+                                .map((g) => DropdownMenuItem(value: g['id'] as int, child: Text(g['name'] as String)))
+                                .toList(),
+                            onChanged: (value) => setState(() => _genderId = value),
+                            validator: (value) =>
+                                _serverErrors.forField('genderId') ?? Validators.requiredSelection(value, label: 'Spol'),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text('Podaci o mentoru',
+                              style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 18)),
+                          const SizedBox(height: 16),
+                          DropdownButtonFormField<int>(
+                            initialValue: _trainingTypeId,
+                            decoration: const InputDecoration(labelText: 'Vrsta treninga'),
+                            items: _trainingTypes
+                                .map((t) => DropdownMenuItem(value: t['id'] as int, child: Text(t['name'] as String)))
+                                .toList(),
+                            onChanged: (value) => setState(() => _trainingTypeId = value),
+                            validator: (value) => _serverErrors.forField('trainingTypeId') ??
+                                Validators.requiredSelection(value, label: 'Vrsta treninga'),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _nickname,
+                            decoration: const InputDecoration(labelText: 'Nadimak / AKA (opciono)'),
+                            validator: _serverErrors.wrap(
+                                'nickname', (v) => Validators.optionalLengthRange(v, 2, 50, label: 'Nadimak')),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _bio,
+                            maxLines: 4,
+                            decoration: const InputDecoration(labelText: 'Biografija (50-4000 znakova)'),
+                            validator: _serverErrors.wrap(
+                                'bio', (v) => Validators.lengthRange(v, 50, 4000, label: 'Biografija')),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _years,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(labelText: 'Godine iskustva (0-60)'),
+                                validator: _serverErrors.wrap(
+                                    'yearsOfExperience',
+                                    (v) => Validators.numberRange(v, 0, 60, label: 'Godine iskustva', isInt: true)),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _price,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(labelText: 'Mjesečna cijena (1-1000 KM)'),
+                                validator: _serverErrors.wrap(
+                                    'monthlyPrice',
+                                    (v) => Validators.numberRange(v, 1, 1000, label: 'Cijena')),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text('Specijalizacije', style: TextStyle(color: Colors.white.withValues(alpha: 0.9))),
+                          ),
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppColors.panelDark,
+                              borderRadius: BorderRadius.circular(10),
+                              border: _specializationIds.isEmpty
+                                  ? Border.all(color: Colors.white24)
+                                  : null,
+                            ),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: _fitnessGoals.map((goal) {
+                                final id = goal['id'] as int;
+                                final selected = _specializationIds.contains(id);
+                                return FilterChip(
+                                  label: Text(goal['name'] as String),
+                                  selected: selected,
+                                  onSelected: (value) => setState(() {
+                                    if (value) {
+                                      _specializationIds.add(id);
+                                    } else {
+                                      _specializationIds.remove(id);
+                                    }
+                                  }),
+                                  selectedColor: AppColors.accent,
+                                  labelStyle: TextStyle(color: selected ? Colors.black : Colors.white),
+                                  backgroundColor: AppColors.panelLight,
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text('Lozinka',
+                              style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 18)),
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _password,
+                                obscureText: true,
+                                decoration: const InputDecoration(labelText: 'Lozinka'),
+                                validator: _serverErrors.wrap('password', Validators.password),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _confirmPassword,
+                                obscureText: true,
+                                decoration: const InputDecoration(labelText: 'Potvrdite lozinku'),
+                                validator: _serverErrors.wrap(
+                                    'confirmPassword', (v) => Validators.confirmPassword(v, _password.text)),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 24),
+                          const Text('Certifikati struke (1-5 fajlova, pdf/jpg/png, max 5 MB)',
+                              style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 18)),
+                          const SizedBox(height: 12),
+                          ..._certificates.map(
+                            (c) => Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: const Icon(Icons.description, color: AppColors.accent),
+                                title: Text(c.name),
+                                subtitle: Text('${(c.sizeBytes / 1024).toStringAsFixed(0)} KB'),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: AppColors.danger),
+                                  onPressed: () => setState(() => _certificates.remove(c)),
+                                ),
+                              ),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _pickCertificates,
+                            icon: const Icon(Icons.upload_file),
+                            label: const Text('Dodaj certifikat'),
+                          ),
+                          const SizedBox(height: 28),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: _submitting ? null : _submit,
+                                  child: _submitting
+                                      ? const SizedBox(
+                                          height: 20,
+                                          width: 20,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                      : const Text('POŠALJI ZAHTJEV ZA REGISTRACIJU'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
+}
 
-  String? _name(String? value) => (value?.trim().length ?? 0) < 2 ? 'Enter at least 2 characters.' : null;
+class _PickedCertificate {
+  _PickedCertificate({required this.path, required this.name, required this.sizeBytes});
+
+  final String path;
+  final String name;
+  final int sizeBytes;
 }

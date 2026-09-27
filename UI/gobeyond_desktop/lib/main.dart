@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'core/session/session_controller.dart';
 import 'core/theme/app_theme.dart';
-import 'presentation/screens/desktop_home_screen.dart';
+import 'presentation/screens/home_shell.dart';
 import 'presentation/screens/login_screen.dart';
 
 void main() {
@@ -35,13 +35,10 @@ class AppBootstrap extends StatefulWidget {
 }
 
 class _AppBootstrapState extends State<AppBootstrap> {
-  late final SessionController _sessionController;
-
   @override
   void initState() {
     super.initState();
-    _sessionController = context.read<SessionController>();
-    _sessionController.hydrate();
+    context.read<SessionController>().hydrate();
   }
 
   @override
@@ -49,15 +46,9 @@ class _AppBootstrapState extends State<AppBootstrap> {
     final session = context.watch<SessionController>();
 
     if (!session.isHydrated) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    if (session.isAuthenticated) {
-      return const DesktopHomeScreen();
-    }
-
-    return const LoginScreen();
+    return session.isAuthenticated ? const HomeShell() : const LoginScreen();
   }
 }

@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/network/api_client.dart';
-import '../../../core/services/panel_api_service.dart';
-import '../../../core/session/session_controller.dart';
-import '../../widgets/panel_card.dart';
-import 'mentor_create_plan_screen.dart';
+import '../../../core/services/mentor_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/api_error.dart';
+import '../../widgets/dialogs.dart';
+import '../../widgets/panel.dart';
+import 'widgets/client_description_dialog.dart';
+import 'widgets/plan_builder_dialog.dart';
 
+/// Mockup 03 — ZAHTJEVI ZA SURADNJU.
 class MentorCollaborationRequestsScreen extends StatefulWidget {
   const MentorCollaborationRequestsScreen({super.key});
 
@@ -15,16 +17,15 @@ class MentorCollaborationRequestsScreen extends StatefulWidget {
 }
 
 class _MentorCollaborationRequestsScreenState extends State<MentorCollaborationRequestsScreen> {
-  final PanelApiService _service = PanelApiService(ApiClient());
-  final TextEditingController _searchController = TextEditingController();
+  final _service = MentorService();
+  final _searchController = TextEditingController();
+  bool _loading = true;
   List<Map<String, dynamic>> _requests = const [];
-  bool _isLoading = true;
-  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _load();
   }
 
   @override
@@ -34,177 +35,145 @@ class _MentorCollaborationRequestsScreenState extends State<MentorCollaborationR
   }
 
   Future<void> _load() async {
-    final session = context.read<SessionController>();
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+    setState(() => _loading = true);
     try {
-      final items = await session.runAuthenticated(
-        (token) => _service.getCollaborationRequests(
-          token,
-          search: _searchController.text,
-        ),
-      );
-      if (!mounted) {
-        return;
-      }
-
+      final requests = await _service.getCollaborationRequests(search: _searchController.text);
+      if (!mounted) return;
       setState(() {
-        _requests = items;
+        _requests = requests;
+        _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (!mounted) return;
+      setState(() => _loading = false);
+      showErrorSnack(context, ApiError.from(error).message);
     }
   }
 
-  void _showQuestionnaire(Map<String, dynamic> request) {
-    final questionnaire = request['questionnaire'] as Map<String, dynamic>? ?? const {};
-
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1F1F1F),
-          title: Text(request['clientName']?.toString() ?? 'Questionnaire'),
-          content: SizedBox(
-            width: 480,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Primary goal: ${questionnaire['primaryGoal']}'),
-                Text('Time commitment: ${questionnaire['timeCommitment']}'),
-                Text('Availability: ${questionnaire['weeklyAvailability']}'),
-                Text('Activity level: ${questionnaire['physicalActivityLevel']}'),
-                Text('Health issues: ${questionnaire['healthIssues']}'),
-                Text('Medications: ${questionnaire['medications']}'),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
+  Future<void> _accept(Map<String, dynamic> request) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Prihvati zahtjev',
+      message: 'Da li prihvatate zahtjev za suradnju sa klijentom ${request['clientFullName']}?',
+      confirmLabel: 'PRIHVATI',
     );
+    if (!confirmed) return;
+    try {
+      await _service.acceptCollaborationRequest(request['subscriptionId'] as int);
+      if (!mounted) return;
+      showSuccessSnack(context, 'Zahtjev klijenta ${request['clientFullName']} je prihvaćen.');
+      _load();
+    } catch (error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
+    }
   }
 
-  Future<void> _openCreatePlan(Map<String, dynamic> request) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => MentorCreatePlanScreen(
-          initialSubscriptionId: request['subscriptionId'] as int?,
-        ),
-      ),
+  Future<void> _reject(Map<String, dynamic> request) async {
+    final reason = await showReasonDialog(
+      context,
+      title: 'Odbij zahtjev',
+      label: 'Razlog odbijanja (10-500 znakova)',
+      warning: 'Klijentu ${request['clientFullName']} će biti vraćen novac za uplatu (refundacija).',
+      confirmLabel: 'ODBIJ',
     );
-
-    if (mounted) {
-      await _load();
+    if (reason == null) return;
+    try {
+      final message = await _service.rejectCollaborationRequest(request['subscriptionId'] as int, reason);
+      if (!mounted) return;
+      showSuccessSnack(context, message);
+      _load();
+    } catch (error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
     }
+  }
+
+  Future<void> _openDetail(Map<String, dynamic> request) async {
+    try {
+      final detail = await _service.getCollaborationRequestDetail(request['subscriptionId'] as int);
+      if (!mounted) return;
+      final isAwaiting = request['status'] == 'AwaitingMentor';
+      await showClientDescriptionDialog<void>(
+        context,
+        detail,
+        extraActions: isAwaiting
+            ? [
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger, side: const BorderSide(color: AppColors.danger)),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _reject(request);
+                  },
+                  child: const Text('ODBIJ'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _accept(request);
+                  },
+                  child: const Text('PRIHVATI'),
+                ),
+              ]
+            : null,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
+    }
+  }
+
+  Future<void> _openPlanBuilder(Map<String, dynamic> request) async {
+    final changed = await showPlanBuilderDialog(
+      context,
+      subscriptionId: request['subscriptionId'] as int,
+      clientFullName: request['clientFullName'] as String? ?? '',
+    );
+    if (changed == true) _load();
   }
 
   @override
   Widget build(BuildContext context) {
-    return PanelCard(
-      title: 'Collaboration Requests',
-      description:
-          'Pending onboarding requests are now searchable, questionnaire-backed and one click away from plan creation.',
-      actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
-      ],
+    return ContentPanel(
+      title: 'ZAHTJEVI ZA SURADNJU',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _searchController,
-            onSubmitted: (_) => _load(),
-            decoration: InputDecoration(
-              hintText: 'Search requests by client or goal',
-              suffixIcon: IconButton(
-                onPressed: _load,
-                icon: const Icon(Icons.search_rounded),
-              ),
-            ),
-          ),
+          SearchField(controller: _searchController, hintText: 'Pretraga po imenu i prezimenu klijenta', onSubmitted: (_) => _load()),
           const SizedBox(height: 16),
-          if (_isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_errorMessage != null)
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent),
-            )
-          else if (_requests.isEmpty)
-            const Text('No collaboration requests match the current search.')
-          else
-            ..._requests.map(
-              (request) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F1F1F),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0x25FFD700)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      request['clientName']?.toString() ?? '-',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${request['fitnessLevel']} • ${request['amountPaid']} BAM',
-                      style: const TextStyle(color: Color(0xFFBDBDBD)),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      (request['questionnaire'] as Map<String, dynamic>?)?['primaryGoal']?.toString() ?? '',
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => _showQuestionnaire(request),
-                            child: const Text('View questionnaire'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => _openCreatePlan(request),
-                            child: const Text('Create plan'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _requests.isEmpty
+                    ? const EmptyState(message: 'Nema zahtjeva za suradnju.')
+                    : ListView.separated(
+                        itemCount: _requests.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final request = _requests[index];
+                          final hasDraftPlan = request['planId'] != null && request['planStatus'] != 'Published';
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                            decoration: BoxDecoration(color: AppColors.panelLight, borderRadius: BorderRadius.circular(14)),
+                            child: Row(
+                              children: [
+                                SizedBox(width: 34, child: Text('${index + 1}.', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                                Expanded(child: Text(request['clientFullName'] as String? ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                                StatusChip(label: SubscriptionStatusPresentation.label(request['status'] as String? ?? ''), color: SubscriptionStatusPresentation.color(request['status'] as String? ?? '')),
+                                const SizedBox(width: 12),
+                                PillButton(label: 'PREGLED..', onPressed: () => _openDetail(request)),
+                                const SizedBox(width: 10),
+                                PillButton(
+                                  label: hasDraftPlan ? 'NASTAVI PLAN' : 'IZRADI PLAN',
+                                  onPressed: () => _openPlanBuilder(request),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+          ),
         ],
       ),
     );

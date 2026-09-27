@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/network/api_client.dart';
-import '../../../core/services/panel_api_service.dart';
-import '../../../core/session/session_controller.dart';
-import '../../widgets/panel_card.dart';
+import '../../../core/services/mentor_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/api_error.dart';
+import '../../../core/utils/formatters.dart';
+import '../../widgets/avatar.dart';
+import '../../widgets/dialogs.dart';
+import '../../widgets/panel.dart';
+import 'mentor_subscriber_detail_screen.dart';
 
+const _statusOptions = ['Active', 'Expired', 'Cancelled'];
+
+/// PRETPLATNICI.
 class MentorSubscribersScreen extends StatefulWidget {
   const MentorSubscribersScreen({super.key});
 
@@ -14,16 +20,16 @@ class MentorSubscribersScreen extends StatefulWidget {
 }
 
 class _MentorSubscribersScreenState extends State<MentorSubscribersScreen> {
-  final PanelApiService _service = PanelApiService(ApiClient());
-  final TextEditingController _searchController = TextEditingController();
+  final _service = MentorService();
+  final _searchController = TextEditingController();
+  bool _loading = true;
   List<Map<String, dynamic>> _subscribers = const [];
-  bool _isLoading = true;
-  String? _errorMessage;
+  String? _statusFilter;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _load();
   }
 
   @override
@@ -33,201 +39,96 @@ class _MentorSubscribersScreenState extends State<MentorSubscribersScreen> {
   }
 
   Future<void> _load() async {
-    final session = context.read<SessionController>();
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+    setState(() => _loading = true);
     try {
-      final items = await session.runAuthenticated(
-        (token) => _service.getSubscribers(
-          token,
-          search: _searchController.text,
-        ),
-      );
-      if (!mounted) {
-        return;
-      }
-
+      final subscribers = await _service.getSubscribers(search: _searchController.text, status: _statusFilter);
+      if (!mounted) return;
       setState(() {
-        _subscribers = items;
+        _subscribers = subscribers;
+        _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _showClientDetail(Map<String, dynamic> subscriber) async {
-    final session = context.read<SessionController>();
-    final clientUserId = subscriber['clientUserId'] as int?;
-    if (clientUserId == null) {
-      return;
-    }
-
-    try {
-      final detail = await session.runAuthenticated(
-        (token) => _service.getClientDetail(token, clientUserId),
-      );
-      if (!mounted) {
-        return;
-      }
-
-      final progress = (detail['recentProgress'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .toList();
-      final questionnaire = detail['questionnaire'] as Map<String, dynamic>?;
-
-      showDialog<void>(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1F1F1F),
-            title: Text(detail['fullName']?.toString() ?? 'Client detail'),
-            content: SizedBox(
-              width: 520,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Email: ${detail['email']}'),
-                  Text('Fitness level: ${detail['fitnessLevel']}'),
-                  Text('Subscription: ${detail['subscriptionStatus']}'),
-                  Text('Weight / Height: ${detail['weight']} kg / ${detail['height']} cm'),
-                  if (questionnaire != null) ...[
-                    const SizedBox(height: 12),
-                    Text('Goal: ${questionnaire['primaryGoal'] ?? '-'}'),
-                    Text('Availability: ${questionnaire['weeklyAvailability'] ?? '-'}'),
-                    Text('Activity: ${questionnaire['physicalActivityLevel'] ?? '-'}'),
-                    Text('Health: ${questionnaire['healthIssues'] ?? '-'}'),
-                  ],
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Recent progress',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  if (progress.isEmpty)
-                    const Text('No progress entries yet.')
-                  else
-                    ...progress.map(
-                      (entry) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text('${entry['title']} • ${entry['metric']}'),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          );
-        },
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to load client detail: $error')),
-      );
+      if (!mounted) return;
+      setState(() => _loading = false);
+      showErrorSnack(context, ApiError.from(error).message);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return PanelCard(
-      title: 'Subscribers',
-      description:
-          'Active subscribers now load from the mentor API with direct client detail access.',
-      actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
-      ],
+    return ContentPanel(
+      title: 'PRETPLATNICI',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _searchController,
-            onSubmitted: (_) => _load(),
-            decoration: InputDecoration(
-              hintText: 'Search subscribers by client or goal',
-              suffixIcon: IconButton(
-                onPressed: _load,
-                icon: const Icon(Icons.search_rounded),
+          Row(children: [
+            Expanded(child: SearchField(controller: _searchController, hintText: 'Pretraga pretplatnika', onSubmitted: (_) => _load())),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 200,
+              child: DropdownButtonFormField<String?>(
+                initialValue: _statusFilter,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('Svi statusi')),
+                  ..._statusOptions.map((s) => DropdownMenuItem(value: s, child: Text(SubscriptionStatusPresentation.label(s)))),
+                ],
+                onChanged: (value) {
+                  setState(() => _statusFilter = value);
+                  _load();
+                },
               ),
             ),
-          ),
+          ]),
           const SizedBox(height: 16),
-          if (_isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_errorMessage != null)
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent),
-            )
-          else if (_subscribers.isEmpty)
-            const Text('No subscribers match the current search.')
-          else
-            ..._subscribers.map(
-              (subscriber) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F1F1F),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0x25FFD700)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            subscriber['clientName']?.toString() ?? '-',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${subscriber['status']} • ${subscriber['primaryGoal']}',
-                            style: const TextStyle(color: Color(0xFFBDBDBD)),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            subscriber['lastCheckInLabel']?.toString() ?? 'No check-in yet',
-                          ),
-                        ],
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _subscribers.isEmpty
+                    ? const EmptyState(message: 'Nema pretplatnika koji odgovaraju pretrazi.')
+                    : ListView.separated(
+                        itemCount: _subscribers.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final subscriber = _subscribers[index];
+                          final status = subscriber['status'] as String? ?? '';
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            decoration: BoxDecoration(color: AppColors.panelLight, borderRadius: BorderRadius.circular(14)),
+                            child: Row(
+                              children: [
+                                GbAvatar(imageUrl: subscriber['clientPhotoUrl'] as String?, size: 56),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(subscriber['clientFullName'] as String? ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${Formatters.date(subscriber['startDate'] as String?)} - ${Formatters.date(subscriber['endDate'] as String?)}',
+                                        style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                StatusChip(label: SubscriptionStatusPresentation.label(status), color: SubscriptionStatusPresentation.color(status)),
+                                const SizedBox(width: 14),
+                                PillButton(
+                                  label: 'PREGLED..',
+                                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                                    builder: (_) => MentorSubscriberDetailScreen(
+                                      subscriptionId: subscriber['subscriptionId'] as int,
+                                      clientFullName: subscriber['clientFullName'] as String? ?? '',
+                                    ),
+                                  )),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                    ),
-                    ElevatedButton(
-                      onPressed: () => _showClientDetail(subscriber),
-                      child: const Text('Client detail'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );

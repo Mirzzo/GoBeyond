@@ -18,37 +18,26 @@ flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 
 ## API configuration
 
-Base URL koristi `GO_BEYOND_API_URL`.
+Base URL koristi `GO_BEYOND_API_URL` (jedino mjesto u kodu: `lib/core/config/app_config.dart`).
 
 Default:
 - `http://localhost:5000`
 
-Definisano u:
-- `lib/core/network/api_client.dart`
+Prijava (test nalozi, lozinka `test` za sve): `admin` / `desktop` (Admin), `mentor` (Mentor). Desktop aplikacija odbija prijavu klijentskih naloga ("Desktop aplikacija je namijenjena administratorima i mentorima.").
 
-## Trenutno implementirano
+## Implementirano (prema docs/api-contract.md)
 
-- Login prema `/api/auth/login`
-- Session token persist/sync
-- Role-based desktop shell (Admin/Mentor)
-- Otvaranje User Profile ekrana klikom na user ime u top baru
-- User profile Save Changes flow prema `/api/user-profile/me`
-- Admin dashboard overview report + mentor report dialog + CSV export
-- Mentor requests screen sa approve/reject akcijama
-- Mentors, clients i subscriptions listing + search + block/delete/detail akcije
-- Mentor collaboration requests i subscribers pregled
-- Mentor create draft / publish plan flow
-- Mentor published plans pregled
+- Auth: login (username ili email), registracija mentora (multipart, certifikati), refresh-on-401 sa automatskim retry-em, logout, promjena lozinke, heartbeat aktivnosti svakih 60s.
+- Obavijesti: bell sa unread brojačem u top baru, ekran Obavijesti (pretraga, pojedinačno/sve označi pročitanim).
+- Admin: Zahtjevi za mentora (pregled + certifikati in-app + odobri/odbij), Mentori (pretraga/filter, uredi, izvještaj, blokiraj, resetuj lozinku, obriši), Klijenti (isti obrazac), Korisnici (dodjela/izmjena uloga), Šifarnici (vrste treninga/ciljevi/nivoi spreme/spolovi CRUD), Upravljanje pretplatama (pregled, otkaži), Sistemske obavijesti (CRUD), Kontrolna ploča (pregled + 6-mjesečna zarada + top 5 mentora + izvještaji mentora/klijenata sa PDF preuzimanjem i printanjem).
+- Mentor: Zahtjevi za suradnju (pregled opisa klijenta, prihvati/odbij), Izrada/uređivanje trening plana (popup sa 7 dana, TRENING/ISHRANA tabovi, objavi plan), Izrađeni planovi (pregled, uredi, arhiviraj/objavi ponovo), Pretplatnici (detalji, evidencija treninga, napredak, poruke), Poruke (chat po pretplati), Kontrolna ploča (obavijesti + brojevi), profil sa certifikatima.
+- PDF izvještaji koriste ugrađeni Noto Sans font (`assets/fonts`) radi ispravnog prikaza č/ć/š/đ/ž, bez oslanjanja na sistemski font.
 
 ## Verification
 
-- `flutter analyze lib test` prolazi
-- `flutter test test/widget_test.dart` prolazi
-
-## Napomena
-
-- Desktop MVP vise ne zavisi od placeholder panela ni `501` endpointa za glavne admin/mentor tokove.
-- API base URL dolazi iz `--dart-define`, tako da isti build moze gadjati i drugi backend bez izmjene koda.
+- `flutter analyze` → No issues found
+- `flutter test` → svi testovi prolaze (validacija, login forma, plan-day dialog, šifarnici forma)
+- `flutter build windows --debug` → zahtijeva Windows Developer Mode (symlink podrška za pluginove)
 
 ## Troubleshooting
 

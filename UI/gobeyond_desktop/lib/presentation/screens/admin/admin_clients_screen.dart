@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/network/api_client.dart';
-import '../../../core/services/panel_api_service.dart';
-import '../../../core/session/session_controller.dart';
-import '../../widgets/panel_card.dart';
-import '../../widgets/admin_user_actions.dart';
-import '../../widgets/report_documents.dart';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/reference_data_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/api_error.dart';
+import '../../widgets/avatar.dart';
+import '../../widgets/dialogs.dart';
+import '../../widgets/panel.dart';
+import 'widgets/client_report_dialog.dart';
+import 'widgets/reset_password_dialog.dart';
+import 'widgets/user_edit_dialog.dart';
 
+/// KLIJENTI — same pattern as Mentori (search + filter by fitness goal/status).
 class AdminClientsScreen extends StatefulWidget {
   const AdminClientsScreen({super.key});
 
@@ -16,17 +20,22 @@ class AdminClientsScreen extends StatefulWidget {
 }
 
 class _AdminClientsScreenState extends State<AdminClientsScreen> {
-  final PanelApiService _service = PanelApiService(ApiClient());
-  final TextEditingController _searchController = TextEditingController();
+  final _service = AdminService();
+  final _referenceDataService = ReferenceDataService();
+  final _searchController = TextEditingController();
+  bool _loading = true;
   List<Map<String, dynamic>> _clients = const [];
-  bool _isLoading = true;
-  bool _isMutating = false;
-  String? _errorMessage;
+  List<Map<String, dynamic>> _fitnessGoals = const [];
+  int? _fitnessGoalFilter;
+  bool? _isActiveFilter;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _referenceDataService.list(ReferenceResource.fitnessGoals).then((value) {
+      if (mounted) setState(() => _fitnessGoals = value);
+    });
+    _load();
   }
 
   @override
@@ -36,198 +45,229 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
   }
 
   Future<void> _load() async {
-    final session = context.read<SessionController>();
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+    setState(() => _loading = true);
     try {
-      final clients = await session.runAuthenticated(
-        (token) => _service.getClients(token, search: _searchController.text),
+      final clients = await _service.getClients(
+        search: _searchController.text,
+        fitnessGoalId: _fitnessGoalFilter,
+        isActive: _isActiveFilter,
       );
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _clients = clients;
+        _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _deleteClient(int userId) async {
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1F1F1F),
-              title: const Text('Delete client account?'),
-              content: const Text(
-                'This deactivates the client account and removes it from active lists.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Delete'),
-                ),
-              ],
-            );
-          },
-        ) ??
-        false;
-
-    if (!confirmed || !mounted) {
-      return;
-    }
-
-    final session = context.read<SessionController>();
-
-    setState(() => _isMutating = true);
-    try {
-      await session.runAuthenticated(
-        (token) => _service.deleteUser(token, userId),
-      );
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Client account deleted.')),
-      );
-      await _load();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete failed: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
-  }
-
-  Future<void> _showReport(Map<String, dynamic> client) async {
-    try {
-      final reports = await context.read<SessionController>().runAuthenticated(
-        (token) => _service.getClientReports(token, search: client['email']?.toString()));
-      final report = reports.firstWhere((item) => item['userId'] == client['userId']);
       if (!mounted) return;
-      showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
-        title: Text('Client report: ${report['fullName']}'),
-        content: SizedBox(width: 470, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Active subscriptions: ${report['activeSubscriptions']}'),
-          Text('Total subscriptions: ${report['totalSubscriptions']}'),
-          Text('Total paid: ${report['totalPaid']} BAM'),
-          Text('Progress check-ins: ${report['progressCheckIns']}'),
-          Text('Completed training days: ${report['completedTrainingDays']}'),
-          Text('Time on platform: ${report['timeOnPlatformMinutes']} minutes'),
-        ])),
-        actions: [ReportDocuments(title: 'Client report: ${report['fullName']}', report: report, fileName: 'gobeyond-client-report'),
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close'))],
-      ));
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to load client report: $e'))); }
+      setState(() => _loading = false);
+      showErrorSnack(context, ApiError.from(error).message);
+    }
+  }
+
+  Future<void> _openFilter() async {
+    int? fitnessGoalId = _fitnessGoalFilter;
+    bool? isActive = _isActiveFilter;
+    await showGbDialog<void>(
+      context: context,
+      title: 'Filter',
+      width: 420,
+      child: StatefulBuilder(
+        builder: (context, setLocalState) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DropdownButtonFormField<int?>(
+              initialValue: fitnessGoalId,
+              decoration: const InputDecoration(labelText: 'Cilj'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Svi ciljevi')),
+                ..._fitnessGoals.map((g) => DropdownMenuItem(value: g['id'] as int, child: Text(g['name'] as String))),
+              ],
+              onChanged: (value) => setLocalState(() => fitnessGoalId = value),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<bool?>(
+              initialValue: isActive,
+              decoration: const InputDecoration(labelText: 'Status'),
+              items: const [
+                DropdownMenuItem(value: null, child: Text('Svi statusi')),
+                DropdownMenuItem(value: true, child: Text('Aktivan')),
+                DropdownMenuItem(value: false, child: Text('Blokiran')),
+              ],
+              onChanged: (value) => setLocalState(() => isActive = value),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            setState(() {
+              _fitnessGoalFilter = null;
+              _isActiveFilter = null;
+            });
+            Navigator.of(context).pop();
+            _load();
+          },
+          child: const Text('Poništi'),
+        ),
+        const SizedBox(width: 8),
+        ElevatedButton(
+          onPressed: () {
+            setState(() {
+              _fitnessGoalFilter = fitnessGoalId;
+              _isActiveFilter = isActive;
+            });
+            Navigator.of(context).pop();
+            _load();
+          },
+          child: const Text('PRIMIJENI'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _delete(Map<String, dynamic> client) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Obriši klijenta',
+      message: 'Da li ste sigurni da želite obrisati klijenta ${client['fullName']}? Ova akcija se ne može poništiti.',
+      confirmLabel: 'OBRIŠI',
+      danger: true,
+    );
+    if (!confirmed) return;
+    try {
+      await _service.deleteUser(client['userId'] as int);
+      if (!mounted) return;
+      showSuccessSnack(context, 'Klijent ${client['fullName']} je obrisan.');
+      _load();
+    } catch (error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
+    }
+  }
+
+  Future<void> _toggleBlock(Map<String, dynamic> client) async {
+    final isActive = client['isActive'] == true;
+    final confirmed = await showConfirmDialog(
+      context,
+      title: isActive ? 'Blokiraj klijenta' : 'Odblokiraj klijenta',
+      message: isActive
+          ? 'Da li ste sigurni da želite blokirati klijenta ${client['fullName']}?'
+          : 'Da li ste sigurni da želite odblokirati klijenta ${client['fullName']}?',
+      confirmLabel: isActive ? 'BLOKIRAJ' : 'ODBLOKIRAJ',
+      danger: isActive,
+    );
+    if (!confirmed) return;
+    try {
+      if (isActive) {
+        await _service.blockUser(client['userId'] as int);
+      } else {
+        await _service.unblockUser(client['userId'] as int);
+      }
+      if (!mounted) return;
+      showSuccessSnack(context, isActive ? 'Klijent ${client['fullName']} je blokiran.' : 'Klijent ${client['fullName']} je odblokiran.');
+      _load();
+    } catch (error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return PanelCard(
-      title: 'Clients',
-      description:
-          'Client management is live with search, subscription counts, and block/delete actions.',
-      actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
-      ],
+    return ContentPanel(
+      title: 'KLIJENTI',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _searchController,
-            onSubmitted: (_) => _load(),
-            decoration: InputDecoration(
-              hintText: 'Search clients',
-              suffixIcon: IconButton(
-                onPressed: _load,
-                icon: const Icon(Icons.search_rounded),
-              ),
-            ),
-          ),
+          Row(children: [
+            Expanded(child: SearchField(controller: _searchController, hintText: 'Pretraga klijenata', onSubmitted: (_) => _load())),
+            const SizedBox(width: 12),
+            PillButton(label: 'FILTER', icon: Icons.filter_list, onPressed: _openFilter),
+          ]),
           const SizedBox(height: 16),
-          if (_isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_errorMessage != null)
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent),
-            )
-          else if (_clients.isEmpty)
-            const Text('No clients match the current search.')
-          else
-            ..._clients.map(
-              (client) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F1F1F),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0x25FFD700)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            client['fullName']?.toString() ?? '-',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${client['fitnessLevel'] ?? 'Client'} • ${client['activeSubscriptions']} active subscriptions',
-                            style: const TextStyle(color: Color(0xFFBDBDBD)),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(client['email']?.toString() ?? '-'),
-                        ],
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _clients.isEmpty
+                    ? const EmptyState(message: 'Nema klijenata koji odgovaraju pretrazi.')
+                    : ListView.separated(
+                        itemCount: _clients.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 14),
+                        itemBuilder: (context, index) {
+                          final client = _clients[index];
+                          final isActive = client['isActive'] == true;
+                          return Container(
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(color: AppColors.panelLight, borderRadius: BorderRadius.circular(18)),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                GbAvatar(imageUrl: client['profileImageUrl'] as String?, size: 84),
+                                const SizedBox(width: 20),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('IME: ${client['fullName']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                                      const SizedBox(height: 4),
+                                      Text('CILJ: ${(client['fitnessGoalName'] as String? ?? '-').toUpperCase()}', style: const TextStyle(color: Colors.white)),
+                                      const SizedBox(height: 4),
+                                      Row(children: [
+                                        Text('Nivo: ${client['fitnessLevelName'] ?? '-'}', style: const TextStyle(color: AppColors.textMuted)),
+                                        const SizedBox(width: 16),
+                                        Text('Mentor: ${client['activeMentorName'] ?? 'Nema'}', style: const TextStyle(color: AppColors.textMuted)),
+                                        const SizedBox(width: 16),
+                                        StatusChip(label: isActive ? 'Aktivan' : 'Blokiran', color: isActive ? AppColors.success : AppColors.danger),
+                                      ]),
+                                    ],
+                                  ),
+                                ),
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  alignment: WrapAlignment.end,
+                                  children: [
+                                    PillButton(
+                                      label: 'UREDI',
+                                      dense: true,
+                                      onPressed: () async {
+                                        final changed = await showUserEditDialog(context, userId: client['userId'] as int);
+                                        if (changed == true) _load();
+                                      },
+                                    ),
+                                    PillButton(
+                                      label: 'IZVJEŠTAJ',
+                                      dense: true,
+                                      onPressed: () => showClientReportDialog(context,
+                                          clientProfileId: client['clientProfileId'] as int, fullName: client['fullName'] as String? ?? ''),
+                                    ),
+                                    PillButton(
+                                      label: isActive ? 'BLOKIRAJ' : 'ODBLOKIRAJ',
+                                      dense: true,
+                                      onPressed: () => _toggleBlock(client),
+                                    ),
+                                    PillButton(
+                                      label: 'RESETUJ LOZINKU',
+                                      dense: true,
+                                      onPressed: () => showResetPasswordDialog(context,
+                                          userId: client['userId'] as int, fullName: client['fullName'] as String? ?? ''),
+                                    ),
+                                    PillButton(
+                                      label: 'OBRIŠI',
+                                      dense: true,
+                                      color: AppColors.danger,
+                                      onPressed: () => _delete(client),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                    ),
-                    TextButton(onPressed: () => _showReport(client), child: const Text('Report')),
-                    AdminUserActions(user: client, onChanged: _load),
-                    ElevatedButton(
-                      onPressed: _isMutating ? null : () => _deleteClient(client['userId'] as int),
-                      child: const Text('Delete'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );
