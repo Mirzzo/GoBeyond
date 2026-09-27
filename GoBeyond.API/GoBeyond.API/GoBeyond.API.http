@@ -1,6 +1,0 @@
-@GoBeyond.API_HostAddress = http://localhost:5292
-
-GET {{GoBeyond.API_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

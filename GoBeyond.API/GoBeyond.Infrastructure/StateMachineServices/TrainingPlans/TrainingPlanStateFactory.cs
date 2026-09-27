@@ -2,24 +2,19 @@ using GoBeyond.Core.Enums;
 
 namespace GoBeyond.Infrastructure.StateMachineServices.TrainingPlans;
 
-public class TrainingPlanStateFactory
+public interface ITrainingPlanStateFactory
 {
-    private readonly IReadOnlyDictionary<TrainingPlanStatus, ITrainingPlanState> _states;
+    BaseTrainingPlanState GetState(TrainingPlanStatus status);
+}
 
-    public TrainingPlanStateFactory(IEnumerable<ITrainingPlanState> states)
-    {
-        _states = states.ToDictionary(
-            x => Enum.Parse<TrainingPlanStatus>(x.Name),
-            x => x);
-    }
+/// <summary>Vraća objekat stanja za trenutni status plana (stanja se registruju u DI kontejneru).</summary>
+public sealed class TrainingPlanStateFactory(IEnumerable<BaseTrainingPlanState> states) : ITrainingPlanStateFactory
+{
+    private readonly IReadOnlyDictionary<TrainingPlanStatus, BaseTrainingPlanState> _states =
+        states.ToDictionary(x => x.Status);
 
-    public ITrainingPlanState Resolve(TrainingPlanStatus status)
-    {
-        if (_states.TryGetValue(status, out var state))
-        {
-            return state;
-        }
-
-        throw new InvalidOperationException($"No training plan state registered for status {status}.");
-    }
+    public BaseTrainingPlanState GetState(TrainingPlanStatus status) =>
+        _states.TryGetValue(status, out var state)
+            ? state
+            : throw new InvalidOperationException($"Stanje plana {status} nije registrovano.");
 }

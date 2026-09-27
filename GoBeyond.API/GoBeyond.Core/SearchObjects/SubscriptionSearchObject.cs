@@ -2,9 +2,8 @@ using GoBeyond.Core.Enums;
 
 namespace GoBeyond.Core.SearchObjects;
 
-public class SubscriptionSearchObject : BaseSearchObject
+public class SubscriptionSearchObject
 {
-    public int? MentorProfileId { get; set; }
-    public int? ClientProfileId { get; set; }
+    public string? Search { get; set; }
     public SubscriptionStatus? Status { get; set; }
 }

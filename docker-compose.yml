@@ -1,3 +1,11 @@
+# GoBeyond: docker compose up -d --build
+#   API            http://localhost:5000 (Swagger: /swagger)
+#   Mailpit (SMTP) http://localhost:8025
+#   RabbitMQ UI    http://localhost:15672
+# Aplikacijska konfiguracija je u appsettings.Shared.json; ovdje se pregazi samo ono što zavisi od
+# Docker mreže (host imena servisa). Opcionalni .env (vidi .env.example) nosi Stripe TEST ključeve.
+name: gobeyond
+
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -14,6 +22,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -26,16 +35,24 @@ services:
     volumes:
       - gobeyond-rabbitdata:/var/lib/rabbitmq
     healthcheck:
-      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      # healthy tek kad AMQP port (5672) prima konekcije
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'check_port_connectivity']
       interval: 10s
       timeout: 5s
       retries: 12
+    restart: unless-stopped
 
   mailpit:
     image: axllent/mailpit:v1.27
     ports:
       - '1025:1025'
       - '8025:8025'
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
 
   api:
     build:
@@ -45,7 +62,6 @@ services:
       - path: .env
         required: false
     environment:
-      ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__MainDb: 'Server=sqlserver,1433;Database=210020;User Id=sa;Password=${SQL_PASSWORD:-GoBeyondDemo!210020};TrustServerCertificate=True'
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USERNAME:-gobeyond}
@@ -59,6 +75,13 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:8080/health > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
 
   email-consumer:
     build:
@@ -72,11 +95,20 @@ services:
       RabbitMq__Username: ${RABBITMQ_USERNAME:-gobeyond}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-GoBeyondDemoRabbit}
       Smtp__Host: mailpit
+      Smtp__Port: 1025
     depends_on:
       rabbitmq:
         condition: service_healthy
       mailpit:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      # Worker osvježava ovaj fajl svakih 15 s dok je povezan na RabbitMQ.
+      test: ['CMD-SHELL', 'find /tmp/gobeyond-consumer.alive -mmin -1 | grep -q .']
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
 
 volumes:
   gobeyond-sqldata:

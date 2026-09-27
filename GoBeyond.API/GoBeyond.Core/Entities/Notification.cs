@@ -9,6 +9,9 @@ public class Notification : BaseEntity
     public string Body { get; set; } = string.Empty;
     public NotificationType Type { get; set; }
     public bool IsRead { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public int? AnnouncementId { get; set; }
 
     public User User { get; set; } = null!;
+    public Announcement? Announcement { get; set; }
 }

@@ -3,9 +3,14 @@
 **/build
 **/.dart_tool
 **/node_modules
+**/wwwroot/uploads
+**/*.user
 .git
 .vs
+.vscode
 .env
 logs
+docs
 UI
 gobeyond-web
+GoBeyond.API/GoBeyond.Tests

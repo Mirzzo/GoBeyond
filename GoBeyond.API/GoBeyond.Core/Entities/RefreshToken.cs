@@ -3,9 +3,12 @@ namespace GoBeyond.Core.Entities;
 public class RefreshToken : BaseEntity
 {
     public int UserId { get; set; }
-    public string Token { get; set; } = string.Empty;
+
+    /// <summary>SHA-256 hash tokena (sam token se nikad ne čuva u bazi).</summary>
+    public string TokenHash { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; set; }
-    public bool IsRevoked { get; set; }
+    public DateTime? RevokedAt { get; set; }
 
     public User User { get; set; } = null!;
 }

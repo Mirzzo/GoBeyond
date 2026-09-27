@@ -6,17 +6,30 @@ public class User : BaseEntity
 {
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? PhoneNumber { get; set; }
+    public DateOnly DateOfBirth { get; set; }
+    public int GenderId { get; set; }
     public string PasswordHash { get; set; } = string.Empty;
     public UserRole Role { get; set; }
     public string? ProfileImageUrl { get; set; }
-    public bool IsActive { get; set; } = true;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>false = korisnik je blokiran.</summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>Soft delete. Obrisan korisnik se ne može odblokirati.</summary>
+    public bool IsDeleted { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastLoginAt { get; set; }
+
+    public Gender Gender { get; set; } = null!;
     public MentorProfile? MentorProfile { get; set; }
     public ClientProfile? ClientProfile { get; set; }
     public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
-    public ICollection<OutboxMessage> OutboxMessages { get; set; } = new List<OutboxMessage>();
     public ICollection<UserActivity> Activities { get; set; } = new List<UserActivity>();
+
+    public string FullName => $"{FirstName} {LastName}";
 }

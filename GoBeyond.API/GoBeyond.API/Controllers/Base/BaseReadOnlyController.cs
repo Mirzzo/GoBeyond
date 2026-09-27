@@ -1,27 +1,26 @@
 using GoBeyond.Core.DTOs.Common;
-using GoBeyond.Infrastructure.Interfaces;
+using GoBeyond.Core.SearchObjects;
+using GoBeyond.Infrastructure.Services.Base;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace GoBeyond.API.Controllers.Base;
 
+/// <summary>
+/// Generički kontroler za čitanje (BaseCRUD obrazac s nastave): GET lista sa SearchObject-om
+/// (<c>{ items, totalCount }</c>) i GET po ID-u. Čitanje šifarnika je anonimno (registracija puni dropdown-e).
+/// </summary>
 [ApiController]
-[Route("api/[controller]")]
-public abstract class BaseReadOnlyController<TModel, TSearch>(
-    IReadOnlyService<TModel, TSearch> service) : ControllerBase
+public abstract class BaseReadOnlyController<TModel, TSearch>(IReadService<TModel, TSearch> service) : ControllerBase
+    where TSearch : BaseSearchObject
 {
     [HttpGet]
-    public virtual Task<PagedResult<TModel>> Get([FromQuery] TSearch search, CancellationToken cancellationToken)
-        => service.GetAsync(search, cancellationToken);
+    [AllowAnonymous]
+    public virtual Task<PagedResult<TModel>> Get([FromQuery] TSearch searchObject, CancellationToken cancellationToken) =>
+        service.GetAsync(searchObject, cancellationToken);
 
     [HttpGet("{id:int}")]
-    public virtual async Task<ActionResult<TModel>> GetById(int id, CancellationToken cancellationToken)
-    {
-        var item = await service.GetByIdAsync(id, cancellationToken);
-        if (item is null)
-        {
-            return NotFound();
-        }
-
-        return Ok(item);
-    }
+    [AllowAnonymous]
+    public virtual Task<TModel> GetById(int id, CancellationToken cancellationToken) =>
+        service.GetByIdAsync(id, cancellationToken);
 }

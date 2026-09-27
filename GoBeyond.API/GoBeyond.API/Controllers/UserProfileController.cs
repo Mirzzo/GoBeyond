@@ -1,42 +1,35 @@
+using System.ComponentModel.DataAnnotations;
 using GoBeyond.API.Extensions;
 using GoBeyond.Core.DTOs.Profile;
-using GoBeyond.Infrastructure.Interfaces;
+using GoBeyond.Infrastructure.Services.Users;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace GoBeyond.API.Controllers;
 
-[Authorize]
 [ApiController]
 [Route("api/user-profile")]
-public class UserProfileController(IUserProfileService userProfileService) : ControllerBase
+[Authorize]
+public sealed class UserProfileController(IUserProfileService profileService) : ControllerBase
 {
     [HttpGet("me")]
-    public Task<UserProfileDto> GetMyProfile(CancellationToken cancellationToken)
-    {
-        var userId = User.GetUserId();
-        return userProfileService.GetMyProfileAsync(userId, cancellationToken);
-    }
-
-    [HttpPost("me")]
-    public Task<UserProfileDto> CreateMyProfile([FromBody] UpsertUserProfileRequestDto request, CancellationToken cancellationToken)
-    {
-        var userId = User.GetUserId();
-        return userProfileService.CreateMyProfileAsync(userId, request, cancellationToken);
-    }
+    public Task<UserProfileDto> GetMe(CancellationToken cancellationToken) =>
+        profileService.GetMeAsync(User.GetUserId(), cancellationToken);
 
     [HttpPut("me")]
-    public Task<UserProfileDto> UpdateMyProfile([FromBody] UpsertUserProfileRequestDto request, CancellationToken cancellationToken)
-    {
-        var userId = User.GetUserId();
-        return userProfileService.UpdateMyProfileAsync(userId, request, cancellationToken);
-    }
+    public Task<UserProfileDto> UpdateMe([FromBody] UpdateProfileRequest request, CancellationToken cancellationToken) =>
+        profileService.UpdateMeAsync(User.GetUserId(), request, cancellationToken);
 
-    [HttpDelete("me")]
-    public async Task<IActionResult> DeleteMyProfile(CancellationToken cancellationToken)
+    [HttpPost("me/photo")]
+    [Consumes("multipart/form-data")]
+    public Task<ProfileImageResponse> UploadPhoto(
+        [Required(ErrorMessage = "Odaberite sliku (JPG ili PNG, najviše 5 MB).")] IFormFile file, CancellationToken cancellationToken) =>
+        profileService.UploadPhotoAsync(User.GetUserId(), file.ToFileUpload(), cancellationToken);
+
+    [HttpDelete("me/photo")]
+    public async Task<IActionResult> DeletePhoto(CancellationToken cancellationToken)
     {
-        var userId = User.GetUserId();
-        await userProfileService.DeleteMyProfileAsync(userId, cancellationToken);
+        await profileService.DeletePhotoAsync(User.GetUserId(), cancellationToken);
         return NoContent();
     }
 }

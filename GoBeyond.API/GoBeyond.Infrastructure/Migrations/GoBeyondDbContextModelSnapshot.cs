@@ -22,6 +22,43 @@ namespace GoBeyond.Infrastructure.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("GoBeyond.Core.Entities.Announcement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TargetRole")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.ToTable("Announcements");
+                });
+
             modelBuilder.Entity("GoBeyond.Core.Entities.ClientProfile", b =>
                 {
                     b.Property<int>("Id")
@@ -30,30 +67,50 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("Age")
+                    b.Property<int>("FitnessGoalId")
                         .HasColumnType("int");
 
-                    b.Property<string>("FitnessLevel")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                    b.Property<int>("FitnessLevelId")
+                        .HasColumnType("int");
 
-                    b.Property<decimal>("Height")
+                    b.Property<string>("GoalDescription")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<decimal>("HeightCm")
                         .HasPrecision(6, 2)
                         .HasColumnType("decimal(6,2)");
+
+                    b.Property<int?>("PreferredTrainingTypeId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TrainingExperienceYears")
+                        .HasColumnType("int");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
-                    b.Property<decimal>("Weight")
+                    b.Property<decimal>("WeightKg")
                         .HasPrecision(6, 2)
                         .HasColumnType("decimal(6,2)");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FitnessGoalId");
+
+                    b.HasIndex("FitnessLevelId");
+
+                    b.HasIndex("PreferredTrainingTypeId");
+
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("ClientProfiles");
+                    b.ToTable("ClientProfiles", t =>
+                        {
+                            t.HasCheckConstraint("CK_ClientProfiles_HeightCm", "[HeightCm] BETWEEN 100 AND 250");
+
+                            t.HasCheckConstraint("CK_ClientProfiles_WeightKg", "[WeightKg] BETWEEN 30 AND 300");
+                        });
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.DayPlan", b =>
@@ -69,26 +126,108 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     b.Property<string>("NutritionDescription")
                         .IsRequired()
+                        .HasMaxLength(8000)
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<TimeSpan>("NutritionDuration")
-                        .HasColumnType("time");
+                    b.Property<int?>("NutritionDurationMinutes")
+                        .HasColumnType("int");
 
                     b.Property<string>("TrainingDescription")
                         .IsRequired()
+                        .HasMaxLength(8000)
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<TimeSpan>("TrainingDuration")
-                        .HasColumnType("time");
+                    b.Property<int>("TrainingDurationMinutes")
+                        .HasColumnType("int");
 
                     b.Property<int>("TrainingPlanId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TrainingPlanId");
+                    b.HasIndex("TrainingPlanId", "DayOfWeek")
+                        .IsUnique();
 
-                    b.ToTable("DayPlans");
+                    b.ToTable("DayPlans", t =>
+                        {
+                            t.HasCheckConstraint("CK_DayPlans_DayOfWeek", "[DayOfWeek] BETWEEN 1 AND 7");
+
+                            t.HasCheckConstraint("CK_DayPlans_TrainingDuration", "[TrainingDurationMinutes] BETWEEN 1 AND 600");
+                        });
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.FitnessGoal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("FitnessGoals");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.FitnessLevel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("FitnessLevels");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.Gender", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Genders");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.MentorCertificate", b =>
@@ -101,14 +240,25 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     b.Property<string>("FileName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("FileUrl")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("IsVerified")
+                        .HasColumnType("bit");
 
                     b.Property<int>("MentorProfileId")
                         .HasColumnType("int");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
@@ -125,35 +275,100 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("Age")
-                        .HasColumnType("int");
-
                     b.Property<string>("Bio")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
-                    b.Property<int>("Category")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("Price")
+                    b.Property<decimal>("MonthlyPrice")
                         .HasPrecision(10, 2)
                         .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("Nickname")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
-                    b.Property<string>("StripeAccountId")
-                        .HasColumnType("nvarchar(max)");
+                    b.Property<int>("TrainingTypeId")
+                        .HasColumnType("int");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
+                    b.Property<int>("YearsOfExperience")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TrainingTypeId");
 
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("MentorProfiles");
+                    b.ToTable("MentorProfiles", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorProfiles_MonthlyPrice", "[MonthlyPrice] BETWEEN 1 AND 1000");
+
+                            t.HasCheckConstraint("CK_MentorProfiles_YearsOfExperience", "[YearsOfExperience] BETWEEN 0 AND 60");
+                        });
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.MentorSpecialization", b =>
+                {
+                    b.Property<int>("MentorProfileId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FitnessGoalId")
+                        .HasColumnType("int");
+
+                    b.HasKey("MentorProfileId", "FitnessGoalId");
+
+                    b.HasIndex("FitnessGoalId");
+
+                    b.ToTable("MentorSpecializations");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.Message", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("SenderUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("SubscriptionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SenderUserId");
+
+                    b.HasIndex("SubscriptionId", "SentAt");
+
+                    b.ToTable("Messages");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Notification", b =>
@@ -164,16 +379,24 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AnnouncementId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Body")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<bool>("IsRead")
                         .HasColumnType("bit");
 
                     b.Property<string>("Title")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
 
                     b.Property<int>("Type")
                         .HasColumnType("int");
@@ -183,9 +406,67 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("AnnouncementId");
+
+                    b.HasIndex("UserId", "IsRead");
 
                     b.ToTable("Notifications");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.OutboxMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTime?>("FailedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("RecipientEmail")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("SentAt", "FailedAt");
+
+                    b.ToTable("OutboxMessages");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Payment", b =>
@@ -200,21 +481,38 @@ namespace GoBeyond.Infrastructure.Migrations
                         .HasPrecision(10, 2)
                         .HasColumnType("decimal(10,2)");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Currency")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Purpose")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("RefundedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
                     b.Property<string>("StripePaymentIntentId")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<int>("SubscriptionId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("StripePaymentIntentId")
+                        .IsUnique();
 
                     b.HasIndex("SubscriptionId");
 
@@ -233,21 +531,40 @@ namespace GoBeyond.Infrastructure.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("Conditioning")
-                        .HasColumnType("nvarchar(max)");
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Measurements")
-                        .HasColumnType("nvarchar(max)");
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<int>("Month")
                         .HasColumnType("int");
 
                     b.Property<string>("PhotoUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("PlanSnapshotJson")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Strength")
-                        .HasColumnType("nvarchar(max)");
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
-                    b.Property<decimal?>("Weight")
+                    b.Property<int?>("TrainingPlanId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("WeightKg")
                         .HasPrecision(6, 2)
                         .HasColumnType("decimal(6,2)");
 
@@ -256,9 +573,15 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ClientProfileId");
+                    b.HasIndex("TrainingPlanId");
 
-                    b.ToTable("ProgressEntries");
+                    b.HasIndex("ClientProfileId", "Year", "Month")
+                        .IsUnique();
+
+                    b.ToTable("ProgressEntries", t =>
+                        {
+                            t.HasCheckConstraint("CK_ProgressEntries_Month", "[Month] BETWEEN 1 AND 12");
+                        });
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Questionnaire", b =>
@@ -269,39 +592,40 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("ClientProfileId")
-                        .HasColumnType("int");
-
                     b.Property<string>("HealthIssues")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Medications")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
-                    b.Property<string>("PhysicalActivityLevel")
+                    b.Property<string>("OutsideActivity")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("PrimaryGoal")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<int>("SubscriptionId")
                         .HasColumnType("int");
 
                     b.Property<string>("TimeCommitment")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
-                    b.Property<string>("WeeklyAvailability")
+                    b.Property<string>("WeeklySessions")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ClientProfileId");
 
                     b.HasIndex("SubscriptionId")
                         .IsUnique();
@@ -317,20 +641,27 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<bool>("IsRevoked")
-                        .HasColumnType("bit");
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime2");
 
-                    b.Property<string>("Token")
+                    b.Property<string>("TokenHash")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
 
                     b.HasIndex("UserId");
 
@@ -350,7 +681,11 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     b.Property<string>("Comment")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("MentorProfileId")
                         .HasColumnType("int");
@@ -358,13 +693,25 @@ namespace GoBeyond.Infrastructure.Migrations
                     b.Property<int>("Rating")
                         .HasColumnType("int");
 
+                    b.Property<int>("SubscriptionId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientProfileId");
 
                     b.HasIndex("MentorProfileId");
 
-                    b.ToTable("Reviews");
+                    b.HasIndex("SubscriptionId")
+                        .IsUnique();
+
+                    b.ToTable("Reviews", t =>
+                        {
+                            t.HasCheckConstraint("CK_Reviews_Rating", "[Rating] BETWEEN 1 AND 5");
+                        });
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Subscription", b =>
@@ -375,33 +722,59 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<decimal>("AmountPaid")
-                        .HasPrecision(10, 2)
-                        .HasColumnType("decimal(10,2)");
+                    b.Property<DateTime?>("AcceptedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("ClientProfileId")
                         .HasColumnType("int");
 
-                    b.Property<DateTime>("EndDate")
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("EndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ExpiryReminderSentAt")
                         .HasColumnType("datetime2");
 
                     b.Property<int>("MentorProfileId")
                         .HasColumnType("int");
 
-                    b.Property<DateTime>("StartDate")
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PlanMissingReminderSentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<DateTime?>("StartDate")
                         .HasColumnType("datetime2");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
-                    b.Property<string>("StripePaymentIntentId")
-                        .HasColumnType("nvarchar(max)");
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("ClientProfileId");
 
                     b.HasIndex("MentorProfileId");
+
+                    b.HasIndex("Status");
 
                     b.ToTable("Subscriptions");
                 });
@@ -417,12 +790,21 @@ namespace GoBeyond.Infrastructure.Migrations
                     b.Property<int>("ClientProfileId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastUpdateNotifiedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("MentorProfileId")
                         .HasColumnType("int");
 
                     b.Property<string>("MotivationalQuote")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -430,7 +812,10 @@ namespace GoBeyond.Infrastructure.Migrations
                     b.Property<int>("SubscriptionId")
                         .HasColumnType("int");
 
-                    b.Property<int>("WeekNumber")
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Version")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
@@ -439,9 +824,77 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     b.HasIndex("MentorProfileId");
 
-                    b.HasIndex("SubscriptionId");
+                    b.HasIndex("SubscriptionId")
+                        .IsUnique();
 
                     b.ToTable("TrainingPlans");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.TrainingSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientProfileId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("DayPlanId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Repetitions")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TrainingPlanId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientProfileId");
+
+                    b.HasIndex("DayPlanId");
+
+                    b.HasIndex("TrainingPlanId");
+
+                    b.ToTable("TrainingSessions", t =>
+                        {
+                            t.HasCheckConstraint("CK_TrainingSessions_Repetitions", "[Repetitions] BETWEEN 1 AND 10000");
+                        });
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.TrainingType", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("TrainingTypes");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.User", b =>
@@ -455,49 +908,139 @@ namespace GoBeyond.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
+                    b.Property<DateOnly>("DateOfBirth")
+                        .HasColumnType("date");
 
-                    b.Property<string>("FirstName")
+                    b.Property<string>("Email")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("GenderId")
+                        .HasColumnType("int");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastLoginAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("LastName")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("ProfileImageUrl")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<int>("Role")
                         .HasColumnType("int");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
                         .IsUnique();
 
+                    b.HasIndex("GenderId");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.UserActivity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ActiveSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("LastHeartbeatAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Day")
+                        .IsUnique();
+
+                    b.ToTable("UserActivities");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.Announcement", b =>
+                {
+                    b.HasOne("GoBeyond.Core.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.ClientProfile", b =>
                 {
+                    b.HasOne("GoBeyond.Core.Entities.FitnessGoal", "FitnessGoal")
+                        .WithMany()
+                        .HasForeignKey("FitnessGoalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GoBeyond.Core.Entities.FitnessLevel", "FitnessLevel")
+                        .WithMany()
+                        .HasForeignKey("FitnessLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GoBeyond.Core.Entities.TrainingType", "PreferredTrainingType")
+                        .WithMany()
+                        .HasForeignKey("PreferredTrainingTypeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("GoBeyond.Core.Entities.User", "User")
                         .WithOne("ClientProfile")
                         .HasForeignKey("GoBeyond.Core.Entities.ClientProfile", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("FitnessGoal");
+
+                    b.Navigation("FitnessLevel");
+
+                    b.Navigation("PreferredTrainingType");
 
                     b.Navigation("User");
                 });
@@ -505,7 +1048,7 @@ namespace GoBeyond.Infrastructure.Migrations
             modelBuilder.Entity("GoBeyond.Core.Entities.DayPlan", b =>
                 {
                     b.HasOne("GoBeyond.Core.Entities.TrainingPlan", "TrainingPlan")
-                        .WithMany("DayPlans")
+                        .WithMany("Days")
                         .HasForeignKey("TrainingPlanId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -526,22 +1069,84 @@ namespace GoBeyond.Infrastructure.Migrations
 
             modelBuilder.Entity("GoBeyond.Core.Entities.MentorProfile", b =>
                 {
+                    b.HasOne("GoBeyond.Core.Entities.TrainingType", "TrainingType")
+                        .WithMany()
+                        .HasForeignKey("TrainingTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("GoBeyond.Core.Entities.User", "User")
                         .WithOne("MentorProfile")
                         .HasForeignKey("GoBeyond.Core.Entities.MentorProfile", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.Navigation("TrainingType");
+
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.MentorSpecialization", b =>
+                {
+                    b.HasOne("GoBeyond.Core.Entities.FitnessGoal", "FitnessGoal")
+                        .WithMany()
+                        .HasForeignKey("FitnessGoalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GoBeyond.Core.Entities.MentorProfile", "MentorProfile")
+                        .WithMany("Specializations")
+                        .HasForeignKey("MentorProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FitnessGoal");
+
+                    b.Navigation("MentorProfile");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.Message", b =>
+                {
+                    b.HasOne("GoBeyond.Core.Entities.User", "SenderUser")
+                        .WithMany()
+                        .HasForeignKey("SenderUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GoBeyond.Core.Entities.Subscription", "Subscription")
+                        .WithMany("Messages")
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SenderUser");
+
+                    b.Navigation("Subscription");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Notification", b =>
                 {
+                    b.HasOne("GoBeyond.Core.Entities.Announcement", "Announcement")
+                        .WithMany("Notifications")
+                        .HasForeignKey("AnnouncementId");
+
                     b.HasOne("GoBeyond.Core.Entities.User", "User")
                         .WithMany("Notifications")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Announcement");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.OutboxMessage", b =>
+                {
+                    b.HasOne("GoBeyond.Core.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("User");
                 });
@@ -551,7 +1156,7 @@ namespace GoBeyond.Infrastructure.Migrations
                     b.HasOne("GoBeyond.Core.Entities.Subscription", "Subscription")
                         .WithMany("Payments")
                         .HasForeignKey("SubscriptionId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Subscription");
@@ -562,27 +1167,26 @@ namespace GoBeyond.Infrastructure.Migrations
                     b.HasOne("GoBeyond.Core.Entities.ClientProfile", "ClientProfile")
                         .WithMany("ProgressEntries")
                         .HasForeignKey("ClientProfileId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("GoBeyond.Core.Entities.TrainingPlan", "TrainingPlan")
+                        .WithMany()
+                        .HasForeignKey("TrainingPlanId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ClientProfile");
+
+                    b.Navigation("TrainingPlan");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Questionnaire", b =>
                 {
-                    b.HasOne("GoBeyond.Core.Entities.ClientProfile", "ClientProfile")
-                        .WithMany("Questionnaires")
-                        .HasForeignKey("ClientProfileId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("GoBeyond.Core.Entities.Subscription", "Subscription")
                         .WithOne("Questionnaire")
                         .HasForeignKey("GoBeyond.Core.Entities.Questionnaire", "SubscriptionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("ClientProfile");
 
                     b.Navigation("Subscription");
                 });
@@ -612,9 +1216,17 @@ namespace GoBeyond.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("GoBeyond.Core.Entities.Subscription", "Subscription")
+                        .WithOne("Review")
+                        .HasForeignKey("GoBeyond.Core.Entities.Review", "SubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("ClientProfile");
 
                     b.Navigation("MentorProfile");
+
+                    b.Navigation("Subscription");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Subscription", b =>
@@ -639,7 +1251,7 @@ namespace GoBeyond.Infrastructure.Migrations
             modelBuilder.Entity("GoBeyond.Core.Entities.TrainingPlan", b =>
                 {
                     b.HasOne("GoBeyond.Core.Entities.ClientProfile", "ClientProfile")
-                        .WithMany("TrainingPlans")
+                        .WithMany()
                         .HasForeignKey("ClientProfileId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
@@ -651,8 +1263,8 @@ namespace GoBeyond.Infrastructure.Migrations
                         .IsRequired();
 
                     b.HasOne("GoBeyond.Core.Entities.Subscription", "Subscription")
-                        .WithMany("TrainingPlans")
-                        .HasForeignKey("SubscriptionId")
+                        .WithOne("TrainingPlan")
+                        .HasForeignKey("GoBeyond.Core.Entities.TrainingPlan", "SubscriptionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -663,17 +1275,69 @@ namespace GoBeyond.Infrastructure.Migrations
                     b.Navigation("Subscription");
                 });
 
+            modelBuilder.Entity("GoBeyond.Core.Entities.TrainingSession", b =>
+                {
+                    b.HasOne("GoBeyond.Core.Entities.ClientProfile", "ClientProfile")
+                        .WithMany("TrainingSessions")
+                        .HasForeignKey("ClientProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GoBeyond.Core.Entities.DayPlan", "DayPlan")
+                        .WithMany()
+                        .HasForeignKey("DayPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GoBeyond.Core.Entities.TrainingPlan", "TrainingPlan")
+                        .WithMany("Sessions")
+                        .HasForeignKey("TrainingPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ClientProfile");
+
+                    b.Navigation("DayPlan");
+
+                    b.Navigation("TrainingPlan");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.User", b =>
+                {
+                    b.HasOne("GoBeyond.Core.Entities.Gender", "Gender")
+                        .WithMany()
+                        .HasForeignKey("GenderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Gender");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.UserActivity", b =>
+                {
+                    b.HasOne("GoBeyond.Core.Entities.User", "User")
+                        .WithMany("Activities")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GoBeyond.Core.Entities.Announcement", b =>
+                {
+                    b.Navigation("Notifications");
+                });
+
             modelBuilder.Entity("GoBeyond.Core.Entities.ClientProfile", b =>
                 {
                     b.Navigation("ProgressEntries");
-
-                    b.Navigation("Questionnaires");
 
                     b.Navigation("Reviews");
 
                     b.Navigation("Subscriptions");
 
-                    b.Navigation("TrainingPlans");
+                    b.Navigation("TrainingSessions");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.MentorProfile", b =>
@@ -682,6 +1346,8 @@ namespace GoBeyond.Infrastructure.Migrations
 
                     b.Navigation("Reviews");
 
+                    b.Navigation("Specializations");
+
                     b.Navigation("Subscriptions");
 
                     b.Navigation("TrainingPlans");
@@ -689,20 +1355,28 @@ namespace GoBeyond.Infrastructure.Migrations
 
             modelBuilder.Entity("GoBeyond.Core.Entities.Subscription", b =>
                 {
+                    b.Navigation("Messages");
+
                     b.Navigation("Payments");
 
                     b.Navigation("Questionnaire");
 
-                    b.Navigation("TrainingPlans");
+                    b.Navigation("Review");
+
+                    b.Navigation("TrainingPlan");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.TrainingPlan", b =>
                 {
-                    b.Navigation("DayPlans");
+                    b.Navigation("Days");
+
+                    b.Navigation("Sessions");
                 });
 
             modelBuilder.Entity("GoBeyond.Core.Entities.User", b =>
                 {
+                    b.Navigation("Activities");
+
                     b.Navigation("ClientProfile");
 
                     b.Navigation("MentorProfile");

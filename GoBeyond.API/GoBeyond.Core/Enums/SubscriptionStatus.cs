@@ -2,8 +2,10 @@ namespace GoBeyond.Core.Enums;
 
 public enum SubscriptionStatus
 {
-    Pending = 1,
-    Active = 2,
-    Expired = 3,
-    Cancelled = 4
+    PendingPayment = 1,
+    AwaitingMentor = 2,
+    Active = 3,
+    Rejected = 4,
+    Cancelled = 5,
+    Expired = 6
 }

@@ -1,130 +1,71 @@
-using System.Text;
+using System.Globalization;
 using System.Text.Json.Serialization;
+using GoBeyond.API.Extensions;
 using GoBeyond.API.Middleware;
-using GoBeyond.API.Utilities;
+using GoBeyond.API.Validation;
+using GoBeyond.Contracts.Configuration;
+using GoBeyond.Infrastructure.Configuration;
 using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Extensions;
-using GoBeyond.Infrastructure.Utilities;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
-using GoBeyond.Contracts.Configuration;
-using GoBeyond.Infrastructure.Payments;
+using Microsoft.AspNetCore.Http.Features;
 
-EnvironmentFile.Load();
+// Brojevi i datumi se parsiraju nezavisno od jezika operativnog sistema (npr. "29.99").
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Configuration
-    .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Shared.json"), optional: false)
-    .AddJsonFile("appsettings.json", optional: true)
-    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true)
-    .AddEnvironmentVariables().AddCommandLine(args);
-builder.Services.AddHttpClient<StripeGateway>();
+
+// Jedini izvor konfiguracije: appsettings.Shared.json (pregaziv environment varijablama / .env).
+builder.Configuration.AddSharedConfiguration();
 
 builder.Services
-    .AddControllers()
-    .AddJsonOptions(options =>
+    .AddControllers(options =>
     {
-        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    });
-builder.Services.AddEndpointsApiExplorer();
+        options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true;
+        ValidationResponseFactory.ConfigureMessages(options.ModelBindingMessageProvider);
+    })
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()))
+    .ConfigureApiBehaviorOptions(options => options.InvalidModelStateResponseFactory = ValidationResponseFactory.Create);
+
+var uploads = builder.Configuration.GetSection(UploadOptions.SectionName).Get<UploadOptions>() ?? new UploadOptions();
+builder.Services.Configure<FormOptions>(options =>
+    options.MultipartBodyLengthLimit = uploads.MaxFileSizeBytes * Math.Max(1, uploads.MaxCertificatesPerUpload) + 1024 * 1024);
+
 builder.Services.AddGoBeyondInfrastructure(builder.Configuration);
-
-var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
-var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey));
-
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.MapInboundClaims = false;
-        options.Events = new JwtBearerEvents
-        {
-            OnTokenValidated = async context =>
-            {
-                var idText = context.Principal?.FindFirst("sub")?.Value;
-                var role = context.Principal?.FindFirst("role")?.Value;
-                if (!int.TryParse(idText, out var userId)) { context.Fail("Invalid user."); return; }
-                var db = context.HttpContext.RequestServices.GetRequiredService<GoBeyondDbContext>();
-                var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId, context.HttpContext.RequestAborted);
-                if (user is null || !user.IsActive || user.Role.ToString() != role)
-                    context.Fail("This session is no longer valid. Sign in again.");
-            }
-        };
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = key,
-            ValidateIssuer = true,
-            ValidIssuer = jwtOptions.Issuer,
-            ValidateAudience = true,
-            ValidAudience = jwtOptions.Audience,
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero,
-            NameClaimType = "sub",
-            RoleClaimType = "role"
-        };
-    });
-
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
-    options.AddPolicy("MentorOnly", policy => policy.RequireRole("Mentor"));
-    options.AddPolicy("ClientOnly", policy => policy.RequireRole("Client"));
-    options.AddPolicy("MentorOrAdmin", policy => policy.RequireRole("Mentor", "Admin"));
-});
-
-builder.Services.AddSwaggerGen(options =>
-{
-    options.SwaggerDoc("v1", new OpenApiInfo { Title = "GoBeyond API", Version = "v1" });
-
-    var securityScheme = new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Description = "Bearer {token}",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Reference = new OpenApiReference
-        {
-            Type = ReferenceType.SecurityScheme,
-            Id = JwtBearerDefaults.AuthenticationScheme
-        }
-    };
-
-    options.AddSecurityDefinition(securityScheme.Reference.Id, securityScheme);
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        { securityScheme, Array.Empty<string>() }
-    });
-});
+builder.Services.AddGoBeyondAuthentication(builder.Configuration);
+builder.Services.AddGoBeyondSwagger();
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+await app.InitializeDatabaseAsync();
+
+app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseStatusCodePages(async context =>
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<GoBeyondDbContext>();
-    await dbContext.Database.MigrateAsync();
+    // Prazni 404/405/415 odgovori dobijaju poruku u obliku ugovora.
+    var response = context.HttpContext.Response;
+    var message = response.StatusCode switch
+    {
+        StatusCodes.Status404NotFound => ErrorMessages.RouteNotFound,
+        StatusCodes.Status405MethodNotAllowed => ErrorMessages.MethodNotAllowed,
+        StatusCodes.Status415UnsupportedMediaType => ErrorMessages.UnsupportedMediaType,
+        _ => null
+    };
+    if (message is not null) await response.WriteAsJsonAsync(new ErrorResponse(message));
+});
 
-    var seeder = scope.ServiceProvider.GetRequiredService<IDatabaseSeeder>();
-    await seeder.SeedAsync();
-}
-
-if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Swagger:Enabled"))
+if (app.Configuration.GetValue<bool>("Swagger:Enabled"))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-if (builder.Configuration.GetValue<bool>("UseHttpsRedirection")) app.UseHttpsRedirection();
-app.UseStaticFiles();
-app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseStaticFiles(); // /seed/... i /uploads/... (wwwroot)
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapControllers();
+app.MapControllers().RequireAuthorization(); // anonimno samo gdje piše [AllowAnonymous]
 app.MapGet("/health", async (GoBeyondDbContext db, CancellationToken ct) =>
-    await db.Database.CanConnectAsync(ct) ? Results.Ok(new { status = "ok" }) : Results.StatusCode(503));
+        await db.Database.CanConnectAsync(ct) ? Results.Ok(new { status = "ok" }) : Results.StatusCode(503))
+    .AllowAnonymous();
 
 await app.RunAsync();
