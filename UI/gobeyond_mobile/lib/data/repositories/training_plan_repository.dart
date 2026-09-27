@@ -6,8 +6,16 @@ class TrainingPlanRepository {
 
   final DioClient _client;
 
+  Future<void> completeDay(int planId, int dayId, int repetitions) async {
+    await _client.dio.post<void>(
+      '/api/training-plans/$planId/days/$dayId/complete',
+      data: {'repetitions': repetitions},
+    );
+  }
+
   Future<TrainingPlanModel> getCurrentPlan() async {
-    final response = await _client.dio.get<Map<String, dynamic>>('/api/training-plans/my-current');
+    final response = await _client.dio
+        .get<Map<String, dynamic>>('/api/training-plans/my-current');
     if (response.data == null) {
       throw Exception('Empty training plan response.');
     }

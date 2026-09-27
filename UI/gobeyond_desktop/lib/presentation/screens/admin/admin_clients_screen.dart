@@ -5,6 +5,8 @@ import '../../../core/network/api_client.dart';
 import '../../../core/services/panel_api_service.dart';
 import '../../../core/session/session_controller.dart';
 import '../../widgets/panel_card.dart';
+import '../../widgets/admin_user_actions.dart';
+import '../../widgets/report_documents.dart';
 
 class AdminClientsScreen extends StatefulWidget {
   const AdminClientsScreen({super.key});
@@ -67,37 +69,6 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
     }
   }
 
-  Future<void> _blockClient(int userId) async {
-    final session = context.read<SessionController>();
-
-    setState(() => _isMutating = true);
-    try {
-      await session.runAuthenticated(
-        (token) => _service.blockUser(token, userId),
-      );
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Client account blocked.')),
-      );
-      await _load();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Block failed: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
-  }
-
   Future<void> _deleteClient(int userId) async {
     final confirmed = await showDialog<bool>(
           context: context,
@@ -155,6 +126,28 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
         setState(() => _isMutating = false);
       }
     }
+  }
+
+  Future<void> _showReport(Map<String, dynamic> client) async {
+    try {
+      final reports = await context.read<SessionController>().runAuthenticated(
+        (token) => _service.getClientReports(token, search: client['email']?.toString()));
+      final report = reports.firstWhere((item) => item['userId'] == client['userId']);
+      if (!mounted) return;
+      showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
+        title: Text('Client report: ${report['fullName']}'),
+        content: SizedBox(width: 470, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Active subscriptions: ${report['activeSubscriptions']}'),
+          Text('Total subscriptions: ${report['totalSubscriptions']}'),
+          Text('Total paid: ${report['totalPaid']} BAM'),
+          Text('Progress check-ins: ${report['progressCheckIns']}'),
+          Text('Completed training days: ${report['completedTrainingDays']}'),
+          Text('Time on platform: ${report['timeOnPlatformMinutes']} minutes'),
+        ])),
+        actions: [ReportDocuments(title: 'Client report: ${report['fullName']}', report: report, fileName: 'gobeyond-client-report'),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close'))],
+      ));
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to load client report: $e'))); }
   }
 
   @override
@@ -225,10 +218,8 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
                         ],
                       ),
                     ),
-                    TextButton(
-                      onPressed: _isMutating ? null : () => _blockClient(client['userId'] as int),
-                      child: const Text('Block'),
-                    ),
+                    TextButton(onPressed: () => _showReport(client), child: const Text('Report')),
+                    AdminUserActions(user: client, onChanged: _load),
                     ElevatedButton(
                       onPressed: _isMutating ? null : () => _deleteClient(client['userId'] as int),
                       child: const Text('Delete'),

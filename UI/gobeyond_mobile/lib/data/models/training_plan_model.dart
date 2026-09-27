@@ -42,7 +42,8 @@ class TrainingPlanModel {
       motivationalQuote: json['motivationalQuote'] as String? ?? '',
       weekNumber: json['weekNumber'] as int? ?? 1,
       focusTitle: json['focusTitle'] as String? ?? 'Structured training week',
-      focusSummary: json['focusSummary'] as String? ?? 'Daily structure ready for review.',
+      focusSummary: json['focusSummary'] as String? ??
+          'Daily structure ready for review.',
       completedSessions: json['completedSessions'] as int? ?? 0,
       totalSessions: json['totalSessions'] as int? ?? days.length,
       nextSessionTitle: json['nextSessionTitle'] as String? ?? 'Session ready',
@@ -54,6 +55,7 @@ class TrainingPlanModel {
 
 class PlanDayModel {
   PlanDayModel({
+    required this.id,
     required this.dayLabel,
     required this.title,
     required this.focus,
@@ -66,6 +68,7 @@ class PlanDayModel {
   });
 
   final String dayLabel;
+  final int id;
   final String title;
   final String focus;
   final String durationLabel;
@@ -89,6 +92,7 @@ class PlanDayModel {
         description.toLowerCase().contains('mobility');
 
     return PlanDayModel(
+      id: json['id'] as int? ?? 0,
       dayLabel: dayName.substring(0, dayName.length < 3 ? dayName.length : 3),
       title: dayName,
       focus: recovery ? 'Recovery' : 'Training',
@@ -96,7 +100,7 @@ class PlanDayModel {
       summary: description,
       mainBlocks: blocks.isEmpty ? [description] : blocks,
       coachNote: nutrition,
-      completed: false,
+      completed: json['completed'] as bool? ?? false,
       recovery: recovery,
     );
   }

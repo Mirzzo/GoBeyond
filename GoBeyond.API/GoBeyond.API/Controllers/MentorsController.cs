@@ -19,11 +19,15 @@ public class MentorsController(GoBeyondDbContext dbContext) : ControllerBase
     public async Task<IReadOnlyList<MentorSummaryDto>> GetMentors(
         [FromQuery] string? search,
         [FromQuery] string? category,
+        [FromQuery] double? minRating,
+        [FromQuery] decimal? maxPrice,
+        [FromQuery] string? sort,
         CancellationToken cancellationToken)
     {
         var query = dbContext.MentorProfiles
             .Include(x => x.User)
             .Include(x => x.Reviews)
+            .Include(x => x.TrainingType)
             .Include(x => x.Subscriptions)
             .Where(x => x.Status == MentorApprovalStatus.Approved && x.User.IsActive);
 
@@ -36,25 +40,38 @@ public class MentorsController(GoBeyondDbContext dbContext) : ControllerBase
                 x.User.LastName.ToLower().Contains(normalizedSearch) ||
                 x.User.Email.ToLower().Contains(normalizedSearch) ||
                 x.Bio.ToLower().Contains(normalizedSearch) ||
+                (x.TrainingType != null && x.TrainingType.Name.ToLower().Contains(normalizedSearch)) ||
                 (hasCategorySearch && x.Category == parsedCategory));
         }
 
         if (!string.IsNullOrWhiteSpace(category))
         {
-            if (!Enum.TryParse<MentorCategory>(category, ignoreCase: true, out var parsedCategory))
-            {
-                throw new InvalidOperationException("Invalid mentor category filter.");
-            }
-
-            query = query.Where(x => x.Category == parsedCategory);
+            var normalizedCategory = category.Trim().ToLower();
+            var hasEnumCategory = Enum.TryParse<MentorCategory>(category, true, out var categoryValue);
+            query = query.Where(x =>
+                (x.TrainingType != null && x.TrainingType.Name.ToLower() == normalizedCategory) ||
+                (hasEnumCategory && x.Category == categoryValue));
         }
+
+        if (maxPrice is < 0) throw new InvalidOperationException("Maximum price must be zero or greater.");
+        if (minRating is < 0 or > 5) throw new InvalidOperationException("Minimum rating must be between 0 and 5.");
+        if (maxPrice is not null) query = query.Where(x => x.Price <= maxPrice.Value);
 
         var mentors = await query
             .OrderBy(x => x.User.FirstName)
             .ThenBy(x => x.User.LastName)
             .ToListAsync(cancellationToken);
 
-        return mentors
+        var filtered = minRating is null ? mentors : mentors
+            .Where(x => x.Reviews.Count > 0 && x.Reviews.Average(y => y.Rating) >= minRating.Value).ToList();
+        filtered = sort?.ToLowerInvariant() switch
+        {
+            "rating" => filtered.OrderByDescending(x => x.Reviews.Count == 0 ? 0 : x.Reviews.Average(y => y.Rating)).ToList(),
+            "priceasc" => filtered.OrderBy(x => x.Price).ToList(),
+            "pricedesc" => filtered.OrderByDescending(x => x.Price).ToList(),
+            _ => filtered
+        };
+        return filtered
             .Select(DtoMapper.ToMentorSummary)
             .ToList();
     }
@@ -67,6 +84,7 @@ public class MentorsController(GoBeyondDbContext dbContext) : ControllerBase
             .Include(x => x.User)
             .Include(x => x.Certificates)
             .Include(x => x.Reviews)
+            .Include(x => x.TrainingType)
             .Include(x => x.Subscriptions)
             .FirstOrDefaultAsync(x => x.Id == id && x.User.IsActive, cancellationToken)
             ?? throw new InvalidOperationException("Mentor not found.");
@@ -110,6 +128,11 @@ public class MentorsController(GoBeyondDbContext dbContext) : ControllerBase
         mentor.Bio = request.Bio.Trim();
         mentor.Age = request.Age;
         mentor.Category = DtoMapper.ParseMentorCategory(request.Category);
+        mentor.TrainingTypeId = request.TrainingTypeId ?? await dbContext.TrainingTypes
+            .Where(x => x.Name == mentor.Category.ToString()).Select(x => (int?)x.Id).FirstOrDefaultAsync(cancellationToken);
+        if (mentor.TrainingTypeId is null || !await dbContext.TrainingTypes.AnyAsync(x => x.Id == mentor.TrainingTypeId, cancellationToken))
+            throw new InvalidOperationException("Selected training type does not exist.");
+        mentor.TrainingType = await dbContext.TrainingTypes.FindAsync([mentor.TrainingTypeId.Value], cancellationToken);
         mentor.Price = request.Price;
         mentor.Status = MentorApprovalStatus.Pending;
 

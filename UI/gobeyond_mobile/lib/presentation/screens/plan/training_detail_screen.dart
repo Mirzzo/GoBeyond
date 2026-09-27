@@ -3,36 +3,78 @@ import 'package:flutter/material.dart';
 import '../../../core/network/dio_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/training_plan_model.dart';
-import '../../../data/repositories/progress_repository.dart';
+import '../../../data/repositories/training_plan_repository.dart';
 import '../../widgets/app_panel.dart';
 
 class TrainingDetailScreen extends StatefulWidget {
-  const TrainingDetailScreen({super.key, required this.day});
+  const TrainingDetailScreen(
+      {super.key, required this.day, required this.planId});
 
   final PlanDayModel day;
+  final int planId;
 
   @override
   State<TrainingDetailScreen> createState() => _TrainingDetailScreenState();
 }
 
 class _TrainingDetailScreenState extends State<TrainingDetailScreen> {
-  final ProgressRepository _progressRepository = ProgressRepository(DioClient());
+  final TrainingPlanRepository _repository =
+      TrainingPlanRepository(DioClient());
   bool _isBusy = false;
+  bool _completed = false;
 
   Future<void> _markReviewed() async {
+    final formKey = GlobalKey<FormState>();
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+                  title: const Text('Završen trening'),
+                  content: Form(
+                      key: formKey,
+                      child: TextFormField(
+                        controller: controller,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: 'Urađena ponavljanja'),
+                        validator: (value) {
+                          final number = int.tryParse(value ?? '');
+                          return number == null || number < 0 || number > 10000
+                              ? 'Unesite broj 0–10000.'
+                              : null;
+                        },
+                      )),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: const Text('Odustani')),
+                    ElevatedButton(
+                        onPressed: () {
+                          if (formKey.currentState!.validate())
+                            Navigator.pop(dialogContext, true);
+                        },
+                        child: const Text('Sačuvaj')),
+                  ],
+                )) ??
+        false;
+    if (!confirmed || !mounted) {
+      controller.dispose();
+      return;
+    }
     setState(() => _isBusy = true);
     try {
-      await _progressRepository.createProgressEntry({
-        'conditioning': 'Reviewed session: ${widget.day.title}',
-      });
+      await _repository.completeDay(
+          widget.planId, widget.day.id, int.parse(controller.text));
 
       if (!mounted) {
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Session review saved to progress history.')),
+        const SnackBar(
+            content: Text('Ponavljanja su sačuvana u historiji treninga.')),
       );
+      setState(() => _completed = true);
     } catch (error) {
       if (!mounted) {
         return;
@@ -42,6 +84,7 @@ class _TrainingDetailScreenState extends State<TrainingDetailScreen> {
         SnackBar(content: Text('Unable to save review: $error')),
       );
     } finally {
+      controller.dispose();
       if (mounted) {
         setState(() => _isBusy = false);
       }
@@ -98,7 +141,8 @@ class _TrainingDetailScreenState extends State<TrainingDetailScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.drag_indicator_rounded, color: AppTheme.textMutedColor),
+                    const Icon(Icons.drag_indicator_rounded,
+                        color: AppTheme.textMutedColor),
                     const SizedBox(width: 10),
                     Expanded(child: Text(block)),
                   ],
@@ -110,14 +154,17 @@ class _TrainingDetailScreenState extends State<TrainingDetailScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _isBusy ? null : _markReviewed,
+              onPressed:
+                  _isBusy || _completed || day.completed ? null : _markReviewed,
               child: _isBusy
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Mark as reviewed'),
+                  : Text(_completed || day.completed
+                      ? 'Trening završen'
+                      : 'Završi trening'),
             ),
           ),
         ],

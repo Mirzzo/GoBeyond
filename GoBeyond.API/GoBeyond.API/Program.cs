@@ -9,11 +9,18 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using GoBeyond.Contracts.Configuration;
+using GoBeyond.Infrastructure.Payments;
 
-EnvLoader.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
-EnvLoader.Load(Path.Combine(Directory.GetCurrentDirectory(), ".env"));
+EnvironmentFile.Load();
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration
+    .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.Shared.json"), optional: false)
+    .AddJsonFile("appsettings.json", optional: true)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true)
+    .AddEnvironmentVariables().AddCommandLine(args);
+builder.Services.AddHttpClient<StripeGateway>();
 
 builder.Services
     .AddControllers()
@@ -32,6 +39,19 @@ builder.Services
     .AddJwtBearer(options =>
     {
         options.MapInboundClaims = false;
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var idText = context.Principal?.FindFirst("sub")?.Value;
+                var role = context.Principal?.FindFirst("role")?.Value;
+                if (!int.TryParse(idText, out var userId)) { context.Fail("Invalid user."); return; }
+                var db = context.HttpContext.RequestServices.GetRequiredService<GoBeyondDbContext>();
+                var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId, context.HttpContext.RequestAborted);
+                if (user is null || !user.IsActive || user.Role.ToString() != role)
+                    context.Fail("This session is no longer valid. Sign in again.");
+            }
+        };
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
@@ -92,17 +112,19 @@ using (var scope = app.Services.CreateScope())
     await seeder.SeedAsync();
 }
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Swagger:Enabled"))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+if (builder.Configuration.GetValue<bool>("UseHttpsRedirection")) app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapGet("/health", async (GoBeyondDbContext db, CancellationToken ct) =>
+    await db.Database.CanConnectAsync(ct) ? Results.Ok(new { status = "ok" }) : Results.StatusCode(503));
 
 await app.RunAsync();

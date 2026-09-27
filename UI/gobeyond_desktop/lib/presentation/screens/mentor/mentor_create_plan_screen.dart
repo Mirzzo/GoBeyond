@@ -10,9 +10,11 @@ class MentorCreatePlanScreen extends StatefulWidget {
   const MentorCreatePlanScreen({
     super.key,
     this.initialSubscriptionId,
+    this.editPlanId,
   });
 
   final int? initialSubscriptionId;
+  final int? editPlanId;
 
   @override
   State<MentorCreatePlanScreen> createState() => _MentorCreatePlanScreenState();
@@ -29,12 +31,13 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
   bool _isLoading = true;
   bool _isSubmitting = false;
   String? _errorMessage;
+  String? _validationError;
 
   @override
   void initState() {
     super.initState();
     _resetDays();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
+    WidgetsBinding.instance.addPostFrameCallback((_) => widget.editPlanId == null ? _loadRequests() : _loadPlan());
   }
 
   @override
@@ -97,6 +100,24 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
     }
   }
 
+  Future<void> _loadPlan() async {
+    try {
+      final detail = await context.read<SessionController>().runAuthenticated(
+        (token) => _service.getPlanDetail(token, widget.editPlanId!));
+      if (!mounted) return;
+      for (final day in _days) { day.dispose(); }
+      setState(() {
+        _days.clear();
+        _days.addAll((detail['days'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().map(_DayDraft.fromJson));
+        _selectedSubscriptionId = detail['subscriptionId'] as int;
+        _requests = [{'subscriptionId': _selectedSubscriptionId, 'clientName': detail['clientName'], 'questionnaire': {'primaryGoal': 'Existing plan'}}];
+        _weekController.text = '${detail['weekNumber']}';
+        _quoteController.text = detail['motivationalQuote']?.toString() ?? '';
+        _isLoading = false;
+      });
+    } catch (e) { if (mounted) setState(() { _errorMessage = e.toString(); _isLoading = false; }); }
+  }
+
   Future<void> _submit({required bool publishAfterSave}) async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -108,6 +129,13 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
       return;
     }
 
+    final selectedDays = _days.map((d) => d.dayOfWeek).toSet();
+    if (selectedDays.length != _days.length) {
+      setState(() => _validationError = 'Each day may appear only once.');
+      return;
+    }
+    _validationError = null;
+
     final payload = {
       'subscriptionId': subscriptionId,
       'weekNumber': int.parse(_weekController.text.trim()),
@@ -118,10 +146,10 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      final createdPlan = await session.runAuthenticated(
-        (token) => _service.createPlan(token, payload),
-      );
-      if (publishAfterSave) {
+      final createdPlan = await session.runAuthenticated((token) => widget.editPlanId == null
+          ? _service.createPlan(token, payload)
+          : _service.updatePlan(token, widget.editPlanId!, payload));
+      if (publishAfterSave && widget.editPlanId == null) {
         await session.runAuthenticated(
           (token) => _service.publishPlan(token, createdPlan['id'] as int),
         );
@@ -134,7 +162,7 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            publishAfterSave
+            widget.editPlanId != null ? 'Training plan updated.' : publishAfterSave
                 ? 'Training plan published successfully.'
                 : 'Training plan saved as draft.',
           ),
@@ -144,7 +172,7 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
       _quoteController.clear();
       _weekController.text = '1';
       _resetDays();
-      await _loadRequests();
+      if (widget.editPlanId != null) { Navigator.of(context).pop(); } else { await _loadRequests(); }
     } catch (error) {
       if (!mounted) {
         return;
@@ -163,7 +191,7 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
   @override
   Widget build(BuildContext context) {
     return PanelCard(
-      title: 'Create Training Plan',
+      title: widget.editPlanId == null ? 'Create Training Plan' : 'Edit Training Plan',
       description:
           'Mentors can now turn a collaboration request into a draft or published training plan from this screen.',
       actions: [
@@ -200,7 +228,7 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
                                   ),
                                 )
                                 .toList(),
-                            onChanged: _isSubmitting
+                            onChanged: _isSubmitting || widget.editPlanId != null
                                 ? null
                                 : (value) {
                                     setState(() {
@@ -210,6 +238,7 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
                             decoration: const InputDecoration(labelText: 'Collaboration request'),
                           ),
                           const SizedBox(height: 12),
+                          if (_validationError != null) Text(_validationError!, style: const TextStyle(color: Colors.redAccent)),
                           Row(
                             children: [
                               Expanded(
@@ -289,11 +318,11 @@ class _MentorCreatePlanScreenState extends State<MentorCreatePlanScreen> {
                                   onPressed: _isSubmitting
                                       ? null
                                       : () => _submit(publishAfterSave: false),
-                                  child: const Text('Save draft'),
+                                  child: Text(widget.editPlanId == null ? 'Save draft' : 'Save changes'),
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              Expanded(
+                              if (widget.editPlanId == null) Expanded(
                                 child: ElevatedButton(
                                   onPressed: _isSubmitting
                                       ? null
@@ -428,6 +457,15 @@ class _DayDraft {
         nutritionDurationController = TextEditingController(text: '15'),
         trainingDescriptionController = TextEditingController(),
         nutritionDescriptionController = TextEditingController();
+
+  factory _DayDraft.fromJson(Map<String, dynamic> data) {
+    final draft = _DayDraft(dayOfWeek: data['dayOfWeek']?.toString() ?? 'Monday');
+    draft.trainingDurationController.text = RegExp(r'\d+').firstMatch(data['trainingDuration']?.toString() ?? '')?.group(0) ?? '45';
+    draft.nutritionDurationController.text = RegExp(r'\d+').firstMatch(data['nutritionDuration']?.toString() ?? '')?.group(0) ?? '15';
+    draft.trainingDescriptionController.text = data['trainingDescription']?.toString() ?? '';
+    draft.nutritionDescriptionController.text = data['nutritionDescription']?.toString() ?? '';
+    return draft;
+  }
 
   static const availableDays = <String>[
     'Monday',

@@ -20,6 +20,8 @@ public class ReviewsController(GoBeyondDbContext dbContext) : ControllerBase
         [FromBody] CreateReviewRequestDto request,
         CancellationToken cancellationToken)
     {
+        if (request.Rating is < 1 or > 5 || string.IsNullOrWhiteSpace(request.Comment) || request.Comment.Trim().Length < 4)
+            throw new InvalidOperationException("Review requires a rating from 1 to 5 and a comment of at least 4 characters.");
         var clientUserId = User.GetUserId();
 
         var client = await dbContext.Users
@@ -29,13 +31,15 @@ public class ReviewsController(GoBeyondDbContext dbContext) : ControllerBase
 
         var mentor = await dbContext.MentorProfiles
             .Include(x => x.User)
-            .FirstOrDefaultAsync(x => x.Id == request.MentorId && x.Status == MentorApprovalStatus.Approved, cancellationToken)
+            .FirstOrDefaultAsync(x => x.Id == request.MentorId, cancellationToken)
             ?? throw new InvalidOperationException("Mentor not found.");
 
         var hasRelationship = await dbContext.Subscriptions
             .AnyAsync(x =>
                 x.ClientProfileId == client.ClientProfile!.Id &&
-                x.MentorProfileId == mentor.Id,
+                x.MentorProfileId == mentor.Id &&
+                (x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Expired || x.Status == SubscriptionStatus.Cancelled) &&
+                x.Payments.Any(p => p.Status == PaymentStatus.Succeeded),
                 cancellationToken);
 
         if (!hasRelationship)

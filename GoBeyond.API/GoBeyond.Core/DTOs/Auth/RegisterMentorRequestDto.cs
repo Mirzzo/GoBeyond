@@ -12,5 +12,6 @@ public record RegisterMentorRequestDto(
     MentorCategory Category,
     decimal Price,
     string CertificateFileName,
-    string CertificateFileUrl
+    string CertificateFileUrl,
+    int? TrainingTypeId = null
 );

@@ -1,0 +1,23 @@
+using System.Net;
+using System.Net.Mail;
+using GoBeyond.EmailConsumer.Options;
+using Microsoft.Extensions.Options;
+
+namespace GoBeyond.EmailConsumer.Services;
+
+public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSender
+{
+    public async Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken = default)
+    {
+        var settings = options.Value;
+        using var client = new SmtpClient(settings.Host, settings.Port)
+        {
+            EnableSsl = settings.UseSsl,
+            UseDefaultCredentials = false
+        };
+        if (!string.IsNullOrWhiteSpace(settings.Username))
+            client.Credentials = new NetworkCredential(settings.Username, settings.Password);
+        using var message = new MailMessage(settings.FromEmail, to, subject, body);
+        await client.SendMailAsync(message, cancellationToken);
+    }
+}

@@ -19,7 +19,8 @@ class AuthScope extends InheritedNotifier<AuthController> {
   }
 
   static AuthController read(BuildContext context) {
-    final element = context.getElementForInheritedWidgetOfExactType<AuthScope>();
+    final element =
+        context.getElementForInheritedWidgetOfExactType<AuthScope>();
     final scope = element?.widget as AuthScope?;
     if (scope == null || scope.notifier == null) {
       throw FlutterError('AuthScope is missing from the widget tree.');

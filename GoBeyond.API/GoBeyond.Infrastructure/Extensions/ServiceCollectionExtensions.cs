@@ -6,6 +6,9 @@ using GoBeyond.Infrastructure.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using GoBeyond.Contracts;
+using GoBeyond.Infrastructure.Messaging;
+using GoBeyond.Infrastructure.Payments;
 
 namespace GoBeyond.Infrastructure.Extensions;
 
@@ -16,6 +19,10 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration)
     {
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+        services.Configure<RabbitMqOptions>(configuration.GetSection(RabbitMqOptions.SectionName));
+        services.Configure<PaymentOptions>(configuration.GetSection(PaymentOptions.SectionName));
+        services.AddScoped<INotificationPublisher, NotificationPublisher>();
+        services.AddHostedService<OutboxDispatcher>();
 
         services.AddDbContext<GoBeyondDbContext>(options =>
         {

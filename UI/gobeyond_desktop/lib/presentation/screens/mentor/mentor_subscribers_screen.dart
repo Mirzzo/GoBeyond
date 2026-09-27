@@ -87,6 +87,7 @@ class _MentorSubscribersScreenState extends State<MentorSubscribersScreen> {
       final progress = (detail['recentProgress'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .toList();
+      final questionnaire = detail['questionnaire'] as Map<String, dynamic>?;
 
       showDialog<void>(
         context: context,
@@ -104,6 +105,13 @@ class _MentorSubscribersScreenState extends State<MentorSubscribersScreen> {
                   Text('Fitness level: ${detail['fitnessLevel']}'),
                   Text('Subscription: ${detail['subscriptionStatus']}'),
                   Text('Weight / Height: ${detail['weight']} kg / ${detail['height']} cm'),
+                  if (questionnaire != null) ...[
+                    const SizedBox(height: 12),
+                    Text('Goal: ${questionnaire['primaryGoal'] ?? '-'}'),
+                    Text('Availability: ${questionnaire['weeklyAvailability'] ?? '-'}'),
+                    Text('Activity: ${questionnaire['physicalActivityLevel'] ?? '-'}'),
+                    Text('Health: ${questionnaire['healthIssues'] ?? '-'}'),
+                  ],
                   const SizedBox(height: 12),
                   const Text(
                     'Recent progress',

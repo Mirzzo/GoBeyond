@@ -18,17 +18,31 @@ class MentorListScreen extends StatefulWidget {
 
 class _MentorListScreenState extends State<MentorListScreen> {
   final MentorRepository _repository = MentorRepository(DioClient());
-  final List<String> _filters = const ['All', 'Hybrid', 'Calisthenics', 'Weightlifting'];
+  List<String> _filters = const ['All'];
   List<MentorModel> _mentors = const [];
   String _selectedFilter = 'All';
   String _searchQuery = '';
+  String _sort = 'rating';
+  double? _minRating;
+  double? _maxPrice;
   bool _isLoading = true;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    _loadTrainingTypes();
     _loadMentors();
+  }
+
+  Future<void> _loadTrainingTypes() async {
+    try {
+      final types = await _repository.getTrainingTypes();
+      if (mounted) setState(() => _filters = ['All', ...types]);
+    } catch (error) {
+      if (mounted)
+        setState(() => _errorMessage = 'Vrste treninga nisu dostupne: $error');
+    }
   }
 
   Future<void> _loadMentors() async {
@@ -41,6 +55,9 @@ class _MentorListScreenState extends State<MentorListScreen> {
       final mentors = await _repository.getMentors(
         search: _searchQuery,
         category: _selectedFilter,
+        minRating: _minRating,
+        maxPrice: _maxPrice,
+        sort: _sort,
       );
       if (!mounted) {
         return;
@@ -110,6 +127,55 @@ class _MentorListScreenState extends State<MentorListScreen> {
               ),
             ),
             const SizedBox(height: 14),
+            Wrap(spacing: 10, runSpacing: 6, children: [
+              DropdownButton<String>(
+                value: _sort,
+                items: const [
+                  DropdownMenuItem(
+                      value: 'rating', child: Text('Najbolje ocijenjeni')),
+                  DropdownMenuItem(
+                      value: 'priceAsc', child: Text('Najniža cijena')),
+                  DropdownMenuItem(
+                      value: 'priceDesc', child: Text('Najviša cijena')),
+                  DropdownMenuItem(value: 'name', child: Text('Ime A–Z')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _sort = value);
+                    _loadMentors();
+                  }
+                },
+              ),
+              DropdownButton<double?>(
+                value: _minRating,
+                hint: const Text('Ocjena'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('Sve ocjene')),
+                  DropdownMenuItem(value: 3, child: Text('3+')),
+                  DropdownMenuItem(value: 4, child: Text('4+')),
+                  DropdownMenuItem(value: 4.5, child: Text('4.5+')),
+                ],
+                onChanged: (value) {
+                  setState(() => _minRating = value);
+                  _loadMentors();
+                },
+              ),
+              DropdownButton<double?>(
+                value: _maxPrice,
+                hint: const Text('Cijena'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('Sve cijene')),
+                  DropdownMenuItem(value: 25, child: Text('Do 25')),
+                  DropdownMenuItem(value: 50, child: Text('Do 50')),
+                  DropdownMenuItem(value: 100, child: Text('Do 100')),
+                ],
+                onChanged: (value) {
+                  setState(() => _maxPrice = value);
+                  _loadMentors();
+                },
+              ),
+            ]),
+            const SizedBox(height: 8),
             SizedBox(
               height: 42,
               child: ListView.separated(
@@ -132,7 +198,8 @@ class _MentorListScreenState extends State<MentorListScreen> {
             const SizedBox(height: 20),
             SectionHeader(
               title: '${_mentors.length} mentors available',
-              subtitle: 'Every list view keeps a search parameter for faster filtering.',
+              subtitle:
+                  'Every list view keeps a search parameter for faster filtering.',
             ),
             const SizedBox(height: 12),
             Expanded(
@@ -147,7 +214,8 @@ class _MentorListScreenState extends State<MentorListScreen> {
                         )
                       : ListView.separated(
                           itemCount: _mentors.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
                           itemBuilder: (context, index) {
                             final mentor = _mentors[index];
                             final accentColor = Color(mentor.accentColorValue);
@@ -158,11 +226,13 @@ class _MentorListScreenState extends State<MentorListScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       CircleAvatar(
                                         radius: 28,
-                                        backgroundColor: accentColor.withValues(alpha: 0.18),
+                                        backgroundColor:
+                                            accentColor.withValues(alpha: 0.18),
                                         child: Text(
                                           mentor.name
                                               .split(' ')
@@ -179,19 +249,25 @@ class _MentorListScreenState extends State<MentorListScreen> {
                                       const SizedBox(width: 14),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Row(
                                               children: [
                                                 Expanded(
                                                   child: Text(
                                                     mentor.name,
-                                                    style: Theme.of(context).textTheme.titleLarge,
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .titleLarge,
                                                   ),
                                                 ),
                                                 Text(
                                                   '\$${mentor.price.toStringAsFixed(0)}/mo',
-                                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .titleMedium
+                                                      ?.copyWith(
                                                         color: accentColor,
                                                       ),
                                                 ),
@@ -200,8 +276,12 @@ class _MentorListScreenState extends State<MentorListScreen> {
                                             const SizedBox(height: 6),
                                             Text(
                                               '${mentor.category} | ${mentor.city}',
-                                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                                    color: AppTheme.textMutedColor,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(
+                                                    color:
+                                                        AppTheme.textMutedColor,
                                                   ),
                                             ),
                                             const SizedBox(height: 10),
@@ -216,7 +296,8 @@ class _MentorListScreenState extends State<MentorListScreen> {
                                     spacing: 8,
                                     runSpacing: 8,
                                     children: mentor.specialties
-                                        .map((specialty) => Chip(label: Text(specialty)))
+                                        .map((specialty) =>
+                                            Chip(label: Text(specialty)))
                                         .toList(),
                                   ),
                                   const SizedBox(height: 16),
@@ -253,7 +334,8 @@ class _MentorListScreenState extends State<MentorListScreen> {
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: ElevatedButton(
-                                          onPressed: () => _openQuestionnaire(mentor),
+                                          onPressed: () =>
+                                              _openQuestionnaire(mentor),
                                           child: const Text('Questionnaire'),
                                         ),
                                       ),

@@ -20,4 +20,6 @@ public record UpsertClientProfileRequestDto(
     decimal Weight,
     decimal Height,
     int Age,
-    string FitnessLevel);
+    string FitnessLevel,
+    string Sex,
+    string TrainingExperience);

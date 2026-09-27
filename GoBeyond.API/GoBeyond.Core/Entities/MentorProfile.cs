@@ -8,6 +8,8 @@ public class MentorProfile : BaseEntity
     public string Bio { get; set; } = string.Empty;
     public int Age { get; set; }
     public MentorCategory Category { get; set; }
+    public int? TrainingTypeId { get; set; }
+    public TrainingType? TrainingType { get; set; }
     public decimal Price { get; set; }
     public MentorApprovalStatus Status { get; set; } = MentorApprovalStatus.Pending;
     public string? StripeAccountId { get; set; }

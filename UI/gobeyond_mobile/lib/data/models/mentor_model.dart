@@ -47,8 +47,10 @@ class MentorModel {
           .map((item) => item.toString())
           .toList(),
       nextStartLabel: json['nextStartLabel'] as String? ?? 'Starts soon',
-      responseTimeLabel: json['responseTimeLabel'] as String? ?? 'Same-day feedback',
-      reviewQuote: json['reviewQuote'] as String? ?? 'Structured coaching with weekly feedback.',
+      responseTimeLabel:
+          json['responseTimeLabel'] as String? ?? 'Same-day feedback',
+      reviewQuote: json['reviewQuote'] as String? ??
+          'Structured coaching with weekly feedback.',
       activeClients: json['activeClients'] as int? ?? 0,
       accentColorValue: json['accentColorValue'] as int? ?? 0xFFF2A541,
       photoUrl: json['profileImageUrl'] as String?,

@@ -22,17 +22,19 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
   late final TextEditingController _heightController;
   late final TextEditingController _weightController;
   late final TextEditingController _fitnessLevelController;
+  String? _sex;
+  String? _trainingExperience;
 
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: 'Luka Client');
-    _emailController = TextEditingController(text: 'client@gobeyond.local');
-    _passwordController = TextEditingController(text: 'Client123!');
-    _ageController = TextEditingController(text: '25');
-    _heightController = TextEditingController(text: '182');
-    _weightController = TextEditingController(text: '78.5');
-    _fitnessLevelController = TextEditingController(text: 'Intermediate');
+    _nameController = TextEditingController();
+    _emailController = TextEditingController();
+    _passwordController = TextEditingController();
+    _ageController = TextEditingController();
+    _heightController = TextEditingController();
+    _weightController = TextEditingController();
+    _fitnessLevelController = TextEditingController();
   }
 
   @override
@@ -85,6 +87,8 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
       'height': double.parse(_heightController.text.trim()),
       'age': int.parse(_ageController.text.trim()),
       'fitnessLevel': _fitnessLevelController.text.trim(),
+      'sex': _sex,
+      'trainingExperience': _trainingExperience,
     };
   }
 
@@ -158,8 +162,8 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
                     return null;
                   }
 
-                  if ((value ?? '').trim().length < 2) {
-                    return 'Enter at least 2 characters.';
+                  if ((value ?? '').trim().split(RegExp(r'\s+')).length < 2) {
+                    return 'Unesite ime i prezime.';
                   }
                   return null;
                 },
@@ -172,7 +176,9 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
               keyboardType: TextInputType.emailAddress,
               validator: (value) {
                 final email = value?.trim() ?? '';
-                if (email.isEmpty || !email.contains('@') || !email.contains('.')) {
+                if (email.isEmpty ||
+                    !email.contains('@') ||
+                    !email.contains('.')) {
                   return 'Enter a valid email format.';
                 }
                 return null;
@@ -184,13 +190,40 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
               decoration: const InputDecoration(labelText: 'Password'),
               obscureText: true,
               validator: (value) {
-                if ((value ?? '').length < 8) {
-                  return 'Use at least 8 characters.';
+                if ((value ?? '').length < (_isLogin ? 1 : 8)) {
+                  return _isLogin
+                      ? 'Unesite lozinku.'
+                      : 'Koristite najmanje 8 znakova.';
                 }
                 return null;
               },
             ),
             if (!_isLogin) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _sex,
+                decoration: const InputDecoration(labelText: 'Spol'),
+                items: const ['Male', 'Female', 'Other']
+                    .map((value) =>
+                        DropdownMenuItem(value: value, child: Text(value)))
+                    .toList(),
+                onChanged: (value) => setState(() => _sex = value),
+                validator: (value) => value == null ? 'Odaberite spol.' : null,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _trainingExperience,
+                decoration:
+                    const InputDecoration(labelText: 'Prethodno iskustvo'),
+                items: const ['Beginner', 'Intermediate', 'Advanced']
+                    .map((value) =>
+                        DropdownMenuItem(value: value, child: Text(value)))
+                    .toList(),
+                onChanged: (value) =>
+                    setState(() => _trainingExperience = value),
+                validator: (value) =>
+                    value == null ? 'Odaberite iskustvo.' : null,
+              ),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -212,7 +245,8 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
                   Expanded(
                     child: TextFormField(
                       controller: _fitnessLevelController,
-                      decoration: const InputDecoration(labelText: 'Fitness level'),
+                      decoration:
+                          const InputDecoration(labelText: 'Fitness level'),
                       validator: (value) {
                         if ((value ?? '').trim().length < 3) {
                           return 'Use at least 3 characters.';
@@ -230,7 +264,8 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
                     child: TextFormField(
                       controller: _heightController,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Height (cm)'),
+                      decoration:
+                          const InputDecoration(labelText: 'Height (cm)'),
                       validator: (value) {
                         final parsed = double.tryParse(value ?? '');
                         if (parsed == null || parsed < 120 || parsed > 240) {
@@ -244,8 +279,10 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
                   Expanded(
                     child: TextFormField(
                       controller: _weightController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Weight (kg)'),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration:
+                          const InputDecoration(labelText: 'Weight (kg)'),
                       validator: (value) {
                         final parsed = double.tryParse(value ?? '');
                         if (parsed == null || parsed < 35 || parsed > 250) {

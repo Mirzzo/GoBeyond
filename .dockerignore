@@ -1,0 +1,11 @@
+**/bin
+**/obj
+**/build
+**/.dart_tool
+**/node_modules
+.git
+.vs
+.env
+logs
+UI
+gobeyond-web

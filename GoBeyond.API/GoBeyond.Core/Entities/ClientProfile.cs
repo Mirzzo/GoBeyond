@@ -7,6 +7,8 @@ public class ClientProfile : BaseEntity
     public decimal Height { get; set; }
     public int Age { get; set; }
     public string FitnessLevel { get; set; } = string.Empty;
+    public string Sex { get; set; } = string.Empty;
+    public string TrainingExperience { get; set; } = string.Empty;
 
     public User User { get; set; } = null!;
     public ICollection<Subscription> Subscriptions { get; set; } = new List<Subscription>();

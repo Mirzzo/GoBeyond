@@ -26,6 +26,12 @@ class PanelApiService {
     return _asMap(response.data);
   }
 
+  Future<List<Map<String, dynamic>>> getClientReports(String token, {String? search}) async {
+    final response = await _client.dio.get<List<dynamic>>('/api/admin/reports/clients',
+      queryParameters: _searchParams(search), options: _authOptions(token));
+    return _asList(response.data);
+  }
+
   Future<List<Map<String, dynamic>>> getMentorRequests(
     String accessToken, {
     String? search,
@@ -115,6 +121,38 @@ class PanelApiService {
       '/api/admin/users/$userId',
       options: _authOptions(accessToken),
     );
+  }
+
+  Future<Map<String, dynamic>> updateUser(String token, int id, Map<String, dynamic> data) async {
+    final response = await _client.dio.put<Map<String, dynamic>>('/api/admin/users/$id',
+        data: data, options: _authOptions(token));
+    return _asMap(response.data);
+  }
+
+  Future<void> resetPassword(String token, int id, String password) async {
+    await _client.dio.put<void>('/api/admin/users/$id/reset-password',
+        data: {'newPassword': password}, options: _authOptions(token));
+  }
+
+  Future<void> unblockUser(String token, int id) async {
+    await _client.dio.put<void>('/api/admin/users/$id/unblock', options: _authOptions(token));
+  }
+
+  Future<List<Map<String, dynamic>>> getTrainingTypes(String token) async {
+    final response = await _client.dio.get<List<dynamic>>('/api/admin/training-types', options: _authOptions(token));
+    return _asList(response.data);
+  }
+
+  Future<void> createTrainingType(String token, Map<String, dynamic> data) async {
+    await _client.dio.post<void>('/api/admin/training-types', data: data, options: _authOptions(token));
+  }
+
+  Future<void> updateTrainingType(String token, int id, Map<String, dynamic> data) async {
+    await _client.dio.put<void>('/api/admin/training-types/$id', data: data, options: _authOptions(token));
+  }
+
+  Future<void> deleteTrainingType(String token, int id) async {
+    await _client.dio.delete<void>('/api/admin/training-types/$id', options: _authOptions(token));
   }
 
   Future<List<Map<String, dynamic>>> getCollaborationRequests(

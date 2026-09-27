@@ -35,7 +35,7 @@ internal static class DtoMapper
             mentor.UserId,
             FullName(mentor.User),
             mentor.User.Email,
-            mentor.Category.ToString(),
+            mentor.TrainingType?.Name ?? mentor.Category.ToString(),
             mentor.Price,
             mentor.Bio,
             mentor.Age,
@@ -59,7 +59,7 @@ internal static class DtoMapper
             user.Email,
             user.Role.ToString(),
             user.IsActive,
-            user.MentorProfile?.Category.ToString(),
+            user.MentorProfile?.TrainingType?.Name ?? user.MentorProfile?.Category.ToString(),
             user.ClientProfile?.FitnessLevel,
             user.Role switch
             {
@@ -105,7 +105,7 @@ internal static class DtoMapper
             mentor.Id,
             FullName(mentor.User),
             mentor.User.Email,
-            mentor.Category.ToString(),
+            mentor.TrainingType?.Name ?? mentor.Category.ToString(),
             mentor.Status.ToString(),
             mentor.Price,
             activeSubscribers,
@@ -131,7 +131,7 @@ internal static class DtoMapper
             mentor.UserId,
             FullName(mentor.User),
             mentor.User.Email,
-            mentor.Category.ToString(),
+            mentor.TrainingType?.Name ?? mentor.Category.ToString(),
             mentor.Price,
             mentor.Bio,
             mentor.Status.ToString(),
@@ -153,7 +153,7 @@ internal static class DtoMapper
             mentor.UserId,
             FullName(mentor.User),
             mentor.User.Email,
-            mentor.Category.ToString(),
+            mentor.TrainingType?.Name ?? mentor.Category.ToString(),
             mentor.Price,
             mentor.Bio,
             mentor.Age,
@@ -356,7 +356,7 @@ internal static class DtoMapper
                 .Take(2)
                 .Select(x => $"{x.DayOfWeek}: {TrimForSummary(x.TrainingDescription, 44)}"));
         var nextSession = orderedDays.FirstOrDefault();
-        var completedSessions = orderedDays.Count(x => DayOfWeekOrder(x.DayOfWeek) < DayOfWeekOrder(DateTime.UtcNow.DayOfWeek));
+        var completedSessions = trainingPlan.Sessions.Select(x => x.DayPlanId).Distinct().Count();
 
         return new TrainingPlanSummaryDto(
             trainingPlan.Id,
@@ -401,7 +401,8 @@ internal static class DtoMapper
                     FormatDuration(x.TrainingDuration),
                     x.TrainingDescription,
                     FormatDuration(x.NutritionDuration),
-                    x.NutritionDescription))
+                    x.NutritionDescription,
+                    trainingPlan.Sessions.FirstOrDefault(s => s.DayPlanId == x.Id)?.Repetitions))
                 .ToList());
     }
 

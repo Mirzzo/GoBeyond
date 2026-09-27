@@ -21,8 +21,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final TrainingPlanRepository _planRepository = TrainingPlanRepository(DioClient());
-  final SubscriptionRepository _subscriptionRepository = SubscriptionRepository(DioClient());
+  final TrainingPlanRepository _planRepository =
+      TrainingPlanRepository(DioClient());
+  final SubscriptionRepository _subscriptionRepository =
+      SubscriptionRepository(DioClient());
 
   TrainingPlanModel? _plan;
   SubscriptionModel? _subscription;
@@ -30,9 +32,24 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _errorMessage;
 
   static const _categories = [
-    ('Strength Plans', 'Weekly structure, deloads and mentor feedback.', Icons.fitness_center_rounded, 0xFFF2A541),
-    ('Habit Reset', 'Nutrition, sleep rhythm and realistic adherence.', Icons.track_changes_rounded, 0xFF5DD6C0),
-    ('Progress Reviews', 'Monthly metrics, notes and plan changes.', Icons.insights_rounded, 0xFF8FA8FF),
+    (
+      'Strength Plans',
+      'Weekly structure, deloads and mentor feedback.',
+      Icons.fitness_center_rounded,
+      0xFFF2A541
+    ),
+    (
+      'Habit Reset',
+      'Nutrition, sleep rhythm and realistic adherence.',
+      Icons.track_changes_rounded,
+      0xFF5DD6C0
+    ),
+    (
+      'Progress Reviews',
+      'Monthly metrics, notes and plan changes.',
+      Icons.insights_rounded,
+      0xFF8FA8FF
+    ),
   ];
 
   @override
@@ -49,7 +66,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final subscriptions = await _subscriptionRepository.getMySubscriptions();
-      final activeSubscription = subscriptions.cast<SubscriptionModel?>().firstWhere(
+      final activeSubscription = subscriptions
+          .cast<SubscriptionModel?>()
+          .firstWhere(
             (item) => item?.status == 'Active',
             orElse: () => subscriptions.isEmpty ? null : subscriptions.first,
           );
@@ -120,7 +139,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: AppTheme.surfaceColor,
                       child: Text(
                         _errorMessage!,
-                        style: theme.textTheme.bodyLarge?.copyWith(color: Colors.redAccent),
+                        style: theme.textTheme.bodyLarge
+                            ?.copyWith(color: Colors.redAccent),
                       ),
                     )
                   else ...[
@@ -138,14 +158,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            plan == null ? 'No active plan yet.' : 'Week ${plan.weekNumber} is underway.',
+                            plan == null
+                                ? 'No active plan yet.'
+                                : 'Week ${plan.weekNumber} is underway.',
                             style: theme.textTheme.labelLarge?.copyWith(
                               color: const Color(0xFFFFE8C7),
                             ),
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            plan?.focusTitle ?? 'Choose a mentor and complete onboarding.',
+                            plan?.focusTitle ??
+                                'Choose a mentor and complete onboarding.',
                             style: theme.textTheme.headlineMedium,
                           ),
                           const SizedBox(height: 12),
@@ -159,7 +182,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: LinearProgressIndicator(
                               value: plan?.completionRate ?? 0,
                               minHeight: 10,
-                              backgroundColor: Colors.white.withValues(alpha: 0.08),
+                              backgroundColor:
+                                  Colors.white.withValues(alpha: 0.08),
                             ),
                           ),
                           const SizedBox(height: 10),
@@ -176,8 +200,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: () => widget.onNavigate(plan == null ? 1 : 2),
-                                  child: Text(plan == null ? 'Explore mentors' : 'Open my plan'),
+                                  onPressed: () =>
+                                      widget.onNavigate(plan == null ? 1 : 2),
+                                  child: Text(plan == null
+                                      ? 'Explore mentors'
+                                      : 'Open my plan'),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -195,7 +222,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 24),
                     const SectionHeader(
                       title: 'Services',
-                      subtitle: 'Core client features required by the mobile flow.',
+                      subtitle:
+                          'Core client features required by the mobile flow.',
                     ),
                     const SizedBox(height: 12),
                     ..._categories.map(
@@ -224,9 +252,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.secondaryColor.withValues(alpha: 0.14),
+                                  color: AppTheme.secondaryColor
+                                      .withValues(alpha: 0.14),
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: Text(
@@ -247,7 +277,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            subscription?.planName ?? 'No subscription selected',
+                            subscription?.planName ??
+                                'No subscription selected',
                             style: theme.textTheme.titleLarge,
                           ),
                           const SizedBox(height: 6),
@@ -288,9 +319,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Coach note', style: theme.textTheme.titleMedium),
+                            Text('Coach note',
+                                style: theme.textTheme.titleMedium),
                             const SizedBox(height: 10),
-                            Text('"${plan.motivationalQuote}"', style: theme.textTheme.bodyLarge),
+                            Text('"${plan.motivationalQuote}"',
+                                style: theme.textTheme.bodyLarge),
                             const SizedBox(height: 14),
                             TextButton(
                               onPressed: () => widget.onNavigate(3),

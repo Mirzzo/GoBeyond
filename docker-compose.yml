@@ -1,58 +1,84 @@
-version: '3.9'
-
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: gobeyond-sqlserver
     environment:
       ACCEPT_EULA: 'Y'
-      SA_PASSWORD: YourStrong!Passw0rd
+      MSSQL_SA_PASSWORD: ${SQL_PASSWORD:-GoBeyondDemo!210020}
     ports:
       - '1433:1433'
     volumes:
       - gobeyond-sqldata:/var/opt/mssql
-    networks:
-      - gobeyond-net
+    healthcheck:
+      test: ['CMD-SHELL', '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: gobeyond-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-gobeyond}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-GoBeyondDemoRabbit}
     ports:
       - '5672:5672'
       - '15672:15672'
-    networks:
-      - gobeyond-net
+    volumes:
+      - gobeyond-rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - '1025:1025'
+      - '8025:8025'
 
   api:
     build:
       context: .
       dockerfile: GoBeyond.API/GoBeyond.API/Dockerfile
-    container_name: gobeyond-api
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__MainDb: 'Server=sqlserver,1433;Database=210020;User Id=sa;Password=${SQL_PASSWORD:-GoBeyondDemo!210020};TrustServerCertificate=True'
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: ${RABBITMQ_USERNAME:-gobeyond}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-GoBeyondDemoRabbit}
     ports:
       - '5000:8080'
+    volumes:
+      - gobeyond-uploads:/app/wwwroot/uploads
     depends_on:
-      - sqlserver
-      - rabbitmq
-    networks:
-      - gobeyond-net
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   email-consumer:
     build:
       context: .
       dockerfile: GoBeyond.API/GoBeyond.EmailConsumer/Dockerfile
-    container_name: gobeyond-email-consumer
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: ${RABBITMQ_USERNAME:-gobeyond}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD:-GoBeyondDemoRabbit}
+      Smtp__Host: mailpit
     depends_on:
-      - rabbitmq
-    networks:
-      - gobeyond-net
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
 
 volumes:
   gobeyond-sqldata:
-
-networks:
-  gobeyond-net:
-    driver: bridge
+  gobeyond-rabbitdata:
+  gobeyond-uploads:

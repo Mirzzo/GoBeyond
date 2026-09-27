@@ -17,4 +17,6 @@ public class User : BaseEntity
     public ClientProfile? ClientProfile { get; set; }
     public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+    public ICollection<OutboxMessage> OutboxMessages { get; set; } = new List<OutboxMessage>();
+    public ICollection<UserActivity> Activities { get; set; } = new List<UserActivity>();
 }

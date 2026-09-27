@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/network/dio_client.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/mentor_model.dart';
@@ -23,21 +25,40 @@ class SubscriptionScreen extends StatefulWidget {
 }
 
 class _SubscriptionScreenState extends State<SubscriptionScreen> {
-  final SubscriptionRepository _repository = SubscriptionRepository(DioClient());
+  final SubscriptionRepository _repository =
+      SubscriptionRepository(DioClient());
   SubscriptionModel? _subscription;
   bool _isLoading = true;
   bool _isBusy = false;
   String? _errorMessage;
+  String _paymentMode = '';
+  String? _publishableKey;
 
-  bool get _isOnboardingFlow => widget.mentor != null && widget.questionnaireAnswers != null;
+  bool get _isOnboardingFlow =>
+      widget.mentor != null && widget.questionnaireAnswers != null;
 
   @override
   void initState() {
     super.initState();
+    _loadPaymentConfig();
     if (_isOnboardingFlow) {
       _isLoading = false;
     } else {
       _loadCurrentSubscription();
+    }
+  }
+
+  Future<void> _loadPaymentConfig() async {
+    try {
+      final config = await _repository.getPaymentConfig();
+      if (mounted)
+        setState(() {
+          _paymentMode = config['mode']?.toString() ?? '';
+          _publishableKey = config['publishableKey']?.toString();
+        });
+    } catch (error) {
+      if (mounted)
+        setState(() => _errorMessage = 'Način plaćanja nije dostupan: $error');
     }
   }
 
@@ -49,7 +70,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
     try {
       final subscriptions = await _repository.getMySubscriptions();
-      final activeSubscription = subscriptions.cast<SubscriptionModel?>().firstWhere(
+      final activeSubscription = subscriptions
+          .cast<SubscriptionModel?>()
+          .firstWhere(
             (item) => item?.status == 'Active',
             orElse: () => subscriptions.isEmpty ? null : subscriptions.first,
           );
@@ -83,24 +106,83 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       return;
     }
 
+    final isDemo = _paymentMode.toLowerCase() == 'demo';
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(isDemo
+                ? 'Potvrditi demo plaćanje?'
+                : 'Nastaviti na Stripe plaćanje?'),
+            content: Text(isDemo
+                ? 'Ovo je simulacija plaćanja. Kartica se ne naplaćuje. Zahtjev za saradnju šalje se mentoru nakon potvrde.'
+                : 'Stripe će otvoriti siguran unos kartice. Pretplata postaje aktivna tek nakon potvrde plaćanja.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Odustani')),
+              ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Nastavi')),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
     setState(() => _isBusy = true);
     try {
-      final created = await _repository.createSubscription({
-        'mentorId': mentor.id,
-        ...answers,
-      });
-      final activated = await _repository.confirmPayment(created.id);
+      final created = _subscription ??
+          await _repository.createSubscription({
+            'mentorId': mentor.id,
+            ...answers,
+          });
+      if (mounted) setState(() => _subscription = created);
+      final intent = await _repository.createPaymentIntent(created.id);
+      final payment = intent['payment'] as Map<String, dynamic>?;
+      final paymentId = payment?['id'] as int?;
+      if (paymentId == null)
+        throw StateError('Server nije vratio identitet plaćanja.');
+      final mode = intent['mode']?.toString() ?? _paymentMode;
+      if (mode.toLowerCase() == 'demo') {
+        await _repository.confirmDemoPayment(paymentId);
+      } else if (mode.toLowerCase() == 'stripe') {
+        final key = intent['publishableKey']?.toString() ??
+            _publishableKey ??
+            AppConstants.stripePublishableKey;
+        final secret = intent['clientSecret']?.toString() ?? '';
+        if (key.isEmpty || secret.isEmpty)
+          throw StateError('Stripe konfiguracija nije potpuna.');
+        Stripe.publishableKey = key;
+        await Stripe.instance.applySettings();
+        await Stripe.instance.initPaymentSheet(
+          paymentSheetParameters: SetupPaymentSheetParameters(
+            paymentIntentClientSecret: secret,
+            merchantDisplayName: 'GoBeyond',
+          ),
+        );
+        await Stripe.instance.presentPaymentSheet();
+        await _repository.refreshPayment(paymentId);
+      } else {
+        throw StateError('Nepoznat način plaćanja.');
+      }
+      final subscriptions = await _repository.getMySubscriptions();
+      final updated =
+          subscriptions.where((item) => item.id == created.id).firstOrNull;
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _subscription = activated;
+        _subscription = updated ?? created;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Subscription activated successfully.')),
+        SnackBar(
+            content: Text(updated?.status == 'Active'
+                ? (mode.toLowerCase() == 'demo'
+                    ? 'Demo plaćanje potvrđeno.'
+                    : 'Stripe plaćanje potvrđeno.')
+                : 'Plaćanje je poslano. Status možete osvježiti nakon potvrde servera.')),
       );
     } catch (error) {
       if (!mounted) {
@@ -108,7 +190,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to activate subscription: $error')),
+        SnackBar(content: Text('Plaćanje nije završeno: $error')),
       );
     } finally {
       if (mounted) {
@@ -129,7 +211,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             return AlertDialog(
               title: const Text('Cancel subscription?'),
               content: const Text(
-                'This action ends the active subscription and marks the latest payment as refunded.',
+                'Ova akcija prekida pretplatu. Potvrdite da želite nastaviti.',
               ),
               actions: [
                 TextButton(
@@ -183,7 +265,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   Widget build(BuildContext context) {
     final mentor = widget.mentor;
     final subscription = _subscription;
-    final titleMentorName = mentor?.name ?? subscription?.mentorName ?? 'No mentor selected';
+    final titleMentorName =
+        mentor?.name ?? subscription?.mentorName ?? 'No mentor selected';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Subscription')),
@@ -219,13 +302,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: AppTheme.secondaryColor.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
-                      subscription?.status ?? (_isOnboardingFlow ? 'Ready to activate' : 'Inactive'),
+                      subscription?.status ??
+                          (_isOnboardingFlow
+                              ? 'Ready to activate'
+                              : 'Inactive'),
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                             color: AppTheme.secondaryColor,
                           ),
@@ -233,7 +320,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    subscription?.planName ?? '${mentor?.category ?? 'Coaching'} / 4 Weeks',
+                    subscription?.planName ??
+                        '${mentor?.category ?? 'Coaching'} / 4 Weeks',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
                   const SizedBox(height: 10),
@@ -252,9 +340,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      _SubscriptionTag(label: subscription != null ? subscription.paymentStatus : 'Awaiting payment'),
-                      _SubscriptionTag(label: widget.questionnaireAnswers == null ? 'Questionnaire pending' : 'Questionnaire received'),
-                      _SubscriptionTag(label: subscription?.hasPublishedPlan == true ? 'Plan active' : 'Plan pending'),
+                      _SubscriptionTag(
+                          label: subscription != null
+                              ? subscription.paymentStatus
+                              : 'Awaiting payment'),
+                      _SubscriptionTag(
+                          label: widget.questionnaireAnswers == null
+                              ? 'Questionnaire pending'
+                              : 'Questionnaire received'),
+                      _SubscriptionTag(
+                          label: subscription?.hasPublishedPlan == true
+                              ? 'Plan active'
+                              : 'Plan pending'),
                     ],
                   ),
                 ],
@@ -263,7 +360,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             const SizedBox(height: 24),
             const SectionHeader(
               title: 'Included',
-              subtitle: 'The client gets clear plan structure, mentor review and visible progress checkpoints.',
+              subtitle:
+                  'The client gets clear plan structure, mentor review and visible progress checkpoints.',
             ),
             const SizedBox(height: 12),
             const AppPanel(
@@ -271,9 +369,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _ChecklistItem(label: 'Weekly mentor check-in with plan adjustment'),
+                  _ChecklistItem(
+                      label: 'Weekly mentor check-in with plan adjustment'),
                   SizedBox(height: 12),
-                  _ChecklistItem(label: 'Session structure with recovery-aware pacing'),
+                  _ChecklistItem(
+                      label: 'Session structure with recovery-aware pacing'),
                   SizedBox(height: 12),
                   _ChecklistItem(label: 'Progress review and adherence notes'),
                 ],
@@ -282,11 +382,14 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             const SizedBox(height: 24),
             const SectionHeader(
               title: 'Status timeline',
-              subtitle: 'Subscription and payment state are now backed by the API.',
+              subtitle:
+                  'Subscription and payment state are now backed by the API.',
             ),
             const SizedBox(height: 12),
             _TimelineTile(
-              title: subscription == null ? 'Questionnaire ready' : 'Payment processed',
+              title: subscription == null
+                  ? 'Questionnaire ready'
+                  : 'Payment processed',
               subtitle: subscription == null
                   ? 'Confirm payment to create the active subscription.'
                   : subscription.paymentStatus,
@@ -306,20 +409,28 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   : 'The mentor will publish the first plan after onboarding review.',
             ),
             const SizedBox(height: 24),
-            if (_isOnboardingFlow && subscription == null) ...[
+            if (_isOnboardingFlow && subscription?.status != 'Active') ...[
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isBusy ? null : _startSubscription,
+                  onPressed: _isBusy || _paymentMode.isEmpty
+                      ? null
+                      : _startSubscription,
                   child: _isBusy
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Confirm payment & activate'),
+                      : Text(_paymentMode.toLowerCase() == 'demo'
+                          ? 'Potvrdi demo plaćanje'
+                          : 'Plati putem Stripe'),
                 ),
               ),
+              if (subscription != null)
+                TextButton(
+                    onPressed: _loadCurrentSubscription,
+                    child: const Text('Osvježi status')),
             ] else if (subscription != null) ...[
               Row(
                 children: [
@@ -339,7 +450,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 ],
               ),
             ] else
-              const Text('Start from the questionnaire to create a subscription request.'),
+              const Text(
+                  'Start from the questionnaire to create a subscription request.'),
           ],
         ],
       ),
@@ -377,7 +489,8 @@ class _ChecklistItem extends StatelessWidget {
       children: [
         const Padding(
           padding: EdgeInsets.only(top: 2),
-          child: Icon(Icons.check_circle_rounded, color: AppTheme.secondaryColor),
+          child:
+              Icon(Icons.check_circle_rounded, color: AppTheme.secondaryColor),
         ),
         const SizedBox(width: 12),
         Expanded(child: Text(label)),

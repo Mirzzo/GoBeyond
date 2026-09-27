@@ -13,7 +13,8 @@ class AuthRepository {
     return _asMap(response.data);
   }
 
-  Future<Map<String, dynamic>> registerClient(Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>> registerClient(
+      Map<String, dynamic> payload) async {
     final response = await _client.dio.post<Map<String, dynamic>>(
       '/api/auth/register/client',
       data: payload,
@@ -22,16 +23,26 @@ class AuthRepository {
   }
 
   Future<Map<String, dynamic>> getMyProfile() async {
-    final response = await _client.dio.get<Map<String, dynamic>>('/api/user-profile/me');
+    final response =
+        await _client.dio.get<Map<String, dynamic>>('/api/user-profile/me');
     return _asMap(response.data);
   }
 
-  Future<Map<String, dynamic>> updateMyProfile(Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>> updateMyProfile(
+      Map<String, dynamic> payload) async {
     final response = await _client.dio.put<Map<String, dynamic>>(
       '/api/user-profile/me',
       data: payload,
     );
     return _asMap(response.data);
+  }
+
+  Future<void> changePassword(
+      String currentPassword, String newPassword) async {
+    await _client.dio.post<void>('/api/auth/change-password', data: {
+      'currentPassword': currentPassword,
+      'newPassword': newPassword,
+    });
   }
 
   Map<String, dynamic> _asMap(Map<String, dynamic>? value) {

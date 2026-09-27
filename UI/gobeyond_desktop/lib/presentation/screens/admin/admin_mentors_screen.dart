@@ -5,6 +5,8 @@ import '../../../core/network/api_client.dart';
 import '../../../core/services/panel_api_service.dart';
 import '../../../core/session/session_controller.dart';
 import '../../widgets/panel_card.dart';
+import '../../widgets/admin_user_actions.dart';
+import '../../widgets/report_documents.dart';
 
 class AdminMentorsScreen extends StatefulWidget {
   const AdminMentorsScreen({super.key});
@@ -65,37 +67,6 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
         setState(() {
           _isLoading = false;
         });
-      }
-    }
-  }
-
-  Future<void> _blockUser(int userId) async {
-    final session = context.read<SessionController>();
-
-    setState(() => _isMutating = true);
-    try {
-      await session.runAuthenticated(
-        (token) => _service.blockUser(token, userId),
-      );
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mentor account blocked.')),
-      );
-      await _load();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Block failed: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
       }
     }
   }
@@ -197,6 +168,7 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
               ),
             ),
             actions: [
+              ReportDocuments(title: 'Mentor report: ${report['mentorName']}', report: report, fileName: 'gobeyond-mentor-report'),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Close'),
@@ -288,10 +260,7 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
                       onPressed: () => _showReport(mentor),
                       child: const Text('Report'),
                     ),
-                    TextButton(
-                      onPressed: _isMutating ? null : () => _blockUser(mentor['userId'] as int),
-                      child: const Text('Block'),
-                    ),
+                    AdminUserActions(user: mentor, onChanged: _load),
                     ElevatedButton(
                       onPressed: _isMutating ? null : () => _deleteUser(mentor['userId'] as int),
                       child: const Text('Delete'),

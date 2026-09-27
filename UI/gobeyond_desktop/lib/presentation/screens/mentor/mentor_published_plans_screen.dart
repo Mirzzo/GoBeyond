@@ -5,6 +5,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/services/panel_api_service.dart';
 import '../../../core/session/session_controller.dart';
 import '../../widgets/panel_card.dart';
+import 'mentor_create_plan_screen.dart';
 
 class MentorPublishedPlansScreen extends StatefulWidget {
   const MentorPublishedPlansScreen({super.key});
@@ -202,6 +203,11 @@ class _MentorPublishedPlansScreenState extends State<MentorPublishedPlansScreen>
                       onPressed: () => _showPlan(plan['id'] as int),
                       child: const Text('Open'),
                     ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(onPressed: () async {
+                      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MentorCreatePlanScreen(editPlanId: plan['id'] as int)));
+                      if (mounted) await _load();
+                    }, child: const Text('Edit plan')),
                   ],
                 ),
               ),

@@ -21,3 +21,6 @@ gobeyond-web/
 # Logs and env
 *.log
 .env
+
+# Local requirement sources (prijava/upute text and mockups)
+docs/requirements/

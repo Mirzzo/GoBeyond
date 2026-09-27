@@ -20,13 +20,15 @@ class SubscriptionRepository {
         .toList();
   }
 
-  Future<SubscriptionModel> createSubscription(Map<String, dynamic> payload) async {
+  Future<SubscriptionModel> createSubscription(
+      Map<String, dynamic> payload) async {
     final response = await _client.dio.post<Map<String, dynamic>>(
       '/api/subscriptions',
       data: payload,
     );
 
-    final subscription = response.data?['subscription'] as Map<String, dynamic>?;
+    final subscription =
+        response.data?['subscription'] as Map<String, dynamic>?;
     if (subscription == null) {
       throw Exception('Empty subscription response.');
     }
@@ -34,18 +36,27 @@ class SubscriptionRepository {
     return SubscriptionModel.fromJson(subscription);
   }
 
-  Future<SubscriptionModel> confirmPayment(int subscriptionId) async {
+  Future<Map<String, dynamic>> getPaymentConfig() async {
+    final response =
+        await _client.dio.get<Map<String, dynamic>>('/api/payments/config');
+    return response.data ?? const {};
+  }
+
+  Future<Map<String, dynamic>> createPaymentIntent(int subscriptionId) async {
     final response = await _client.dio.post<Map<String, dynamic>>(
       '/api/payments/create-intent',
       data: {'subscriptionId': subscriptionId},
     );
+    return response.data ??
+        (throw StateError('Server nije vratio podatke za plaćanje.'));
+  }
 
-    final subscription = response.data?['subscription'] as Map<String, dynamic>?;
-    if (subscription == null) {
-      throw Exception('Empty payment response.');
-    }
+  Future<void> confirmDemoPayment(int paymentId) async {
+    await _client.dio.post<void>('/api/payments/$paymentId/confirm-demo');
+  }
 
-    return SubscriptionModel.fromJson(subscription);
+  Future<void> refreshPayment(int paymentId) async {
+    await _client.dio.post<void>('/api/payments/$paymentId/refresh');
   }
 
   Future<SubscriptionModel> cancelSubscription(int subscriptionId) async {

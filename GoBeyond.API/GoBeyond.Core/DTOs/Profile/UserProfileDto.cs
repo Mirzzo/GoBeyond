@@ -25,4 +25,6 @@ public record ClientProfileDto(
     decimal Weight,
     decimal Height,
     int Age,
-    string FitnessLevel);
+    string FitnessLevel,
+    string Sex,
+    string TrainingExperience);

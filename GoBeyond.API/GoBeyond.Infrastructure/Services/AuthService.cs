@@ -3,6 +3,7 @@ using GoBeyond.Core.Entities;
 using GoBeyond.Core.Enums;
 using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Interfaces;
+using GoBeyond.Infrastructure.Messaging;
 using GoBeyond.Infrastructure.Utilities;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,10 +12,17 @@ namespace GoBeyond.Infrastructure.Services;
 public class AuthService(
     GoBeyondDbContext dbContext,
     IJwtTokenGenerator jwtTokenGenerator,
-    IPasswordHasherService passwordHasherService) : IAuthService
+    IPasswordHasherService passwordHasherService,
+    INotificationPublisher notificationPublisher) : IAuthService
 {
     public async Task<AuthResponseDto> RegisterClientAsync(RegisterClientRequestDto request, CancellationToken cancellationToken = default)
     {
+        ValidateRegistration(request.FirstName, request.LastName, request.Email, request.Password);
+        if (request.Age is < 18 or > 100 || request.Weight is <= 0 or > 1000 || request.Height is <= 0 or > 300 ||
+            string.IsNullOrWhiteSpace(request.FitnessLevel) ||
+            !new[] { "Male", "Female", "Other" }.Contains(request.Sex, StringComparer.OrdinalIgnoreCase) ||
+            !new[] { "Beginner", "Intermediate", "Advanced" }.Contains(request.TrainingExperience, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Client profile requires age 18-100, valid weight/height, sex and training experience.");
         await EnsureEmailAvailableAsync(request.Email, cancellationToken);
 
         var user = new User
@@ -31,7 +39,9 @@ public class AuthService(
                 Weight = request.Weight,
                 Height = request.Height,
                 Age = request.Age,
-                FitnessLevel = request.FitnessLevel
+                FitnessLevel = request.FitnessLevel.Trim(),
+                Sex = request.Sex.Trim(),
+                TrainingExperience = request.TrainingExperience.Trim()
             }
         };
 
@@ -43,7 +53,20 @@ public class AuthService(
 
     public async Task<AuthResponseDto> RegisterMentorAsync(RegisterMentorRequestDto request, CancellationToken cancellationToken = default)
     {
+        ValidateRegistration(request.FirstName, request.LastName, request.Email, request.Password);
+        if (request.Age is < 18 or > 80 || request.Price <= 0 || request.Price > 10000 ||
+            string.IsNullOrWhiteSpace(request.Bio) || request.Bio.Trim().Length < 10 ||
+            !Enum.IsDefined(request.Category) || string.IsNullOrWhiteSpace(request.CertificateFileName) ||
+            string.IsNullOrWhiteSpace(request.CertificateFileUrl))
+            throw new InvalidOperationException("Mentor profile requires bio (10+ characters), age 18-80, valid training category, positive price and certificate.");
         await EnsureEmailAvailableAsync(request.Email, cancellationToken);
+
+        var trainingTypeId = request.TrainingTypeId ?? await dbContext.TrainingTypes
+            .Where(x => x.Name == request.Category.ToString())
+            .Select(x => (int?)x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (trainingTypeId is null || !await dbContext.TrainingTypes.AnyAsync(x => x.Id == trainingTypeId, cancellationToken))
+            throw new InvalidOperationException("Selected training type does not exist.");
 
         var user = new User
         {
@@ -59,6 +82,7 @@ public class AuthService(
                 Bio = request.Bio,
                 Age = request.Age,
                 Category = request.Category,
+                TrainingTypeId = trainingTypeId,
                 Price = request.Price,
                 Status = MentorApprovalStatus.Pending,
                 Certificates =
@@ -73,6 +97,10 @@ public class AuthService(
         };
 
         dbContext.Users.Add(user);
+        var adminEmails = await dbContext.Users.Where(x => x.Role == UserRole.Admin && x.IsActive)
+            .Select(x => x.Email).ToListAsync(cancellationToken);
+        foreach (var adminEmail in adminEmails)
+            await notificationPublisher.PublishAsync("mentor.registered", adminEmail, "Mentor approval waiting", $"{user.FirstName} {user.LastName} registered as mentor.", cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return await BuildAuthResponseAsync(user, cancellationToken);
@@ -80,7 +108,17 @@ public class AuthService(
 
     public async Task<AuthResponseDto> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+            throw new InvalidOperationException("Email or username and password are required.");
+        var input = request.Email.Trim().ToLowerInvariant();
+        var aliases = new Dictionary<string, string>
+        {
+            ["admin"] = "admin@gobeyond.local", ["desktop"] = "admin@gobeyond.local",
+            ["mentor"] = "mentor@gobeyond.local", ["client"] = "client@gobeyond.local",
+            ["mobile"] = "client@gobeyond.local"
+        };
+        var isDemoAlias = aliases.TryGetValue(input, out var demoEmail);
+        var normalizedEmail = isDemoAlias ? demoEmail! : input;
 
         var user = await dbContext.Users
             .Include(x => x.MentorProfile)
@@ -109,10 +147,12 @@ public class AuthService(
     {
         var tokenEntity = await dbContext.RefreshTokens
             .Include(x => x.User)
+                .ThenInclude(x => x.MentorProfile)
             .FirstOrDefaultAsync(x => x.Token == refreshToken, cancellationToken)
             ?? throw new InvalidOperationException("Invalid refresh token.");
 
-        if (tokenEntity.IsRevoked || tokenEntity.ExpiresAt <= DateTime.UtcNow)
+        if (tokenEntity.IsRevoked || tokenEntity.ExpiresAt <= DateTime.UtcNow || !tokenEntity.User.IsActive ||
+            (tokenEntity.User.Role == UserRole.Mentor && tokenEntity.User.MentorProfile?.Status != MentorApprovalStatus.Approved))
         {
             throw new InvalidOperationException("Refresh token expired or revoked.");
         }
@@ -135,7 +175,19 @@ public class AuthService(
         }
 
         user.PasswordHash = passwordHasherService.Hash(newPassword);
+        foreach (var token in await dbContext.RefreshTokens
+            .Where(x => x.UserId == userId && !x.IsRevoked).ToListAsync(cancellationToken))
+            token.IsRevoked = true;
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void ValidateRegistration(string firstName, string lastName, string email, string password)
+    {
+        if (string.IsNullOrWhiteSpace(firstName) || firstName.Trim().Length < 2 ||
+            string.IsNullOrWhiteSpace(lastName) || lastName.Trim().Length < 2 ||
+            string.IsNullOrWhiteSpace(email) || !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(email) ||
+            string.IsNullOrWhiteSpace(password) || password.Length < 8)
+            throw new InvalidOperationException("First and last name require 2+ characters, email must be valid, and password requires 8+ characters.");
     }
 
     private async Task<AuthResponseDto> BuildAuthResponseAsync(User user, CancellationToken cancellationToken)

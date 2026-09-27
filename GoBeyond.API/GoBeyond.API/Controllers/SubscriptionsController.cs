@@ -168,15 +168,6 @@ public class SubscriptionsController(GoBeyondDbContext dbContext) : ControllerBa
         subscription.Status = SubscriptionStatus.Cancelled;
         subscription.EndDate = DateTime.UtcNow.Date;
 
-        var latestPayment = subscription.Payments
-            .OrderByDescending(x => x.Id)
-            .FirstOrDefault();
-
-        if (latestPayment is not null && latestPayment.Status == PaymentStatus.Succeeded)
-        {
-            latestPayment.Status = PaymentStatus.Refunded;
-        }
-
         dbContext.Notifications.Add(new Notification
         {
             UserId = subscription.MentorProfile.UserId,

@@ -2,11 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/services/panel_api_service.dart';
 import '../../../core/session/session_controller.dart';
 import '../../widgets/panel_card.dart';
+import '../../widgets/report_documents.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -128,6 +131,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  Future<void> _pdfReport({required bool print}) async {
+    final overview = _overview;
+    if (overview == null) return;
+    try {
+      final document = pw.Document();
+      final metrics = (overview['metrics'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>();
+      final alerts = (overview['alerts'] as List<dynamic>? ?? const []);
+      document.addPage(pw.MultiPage(build: (_) => [
+        pw.Text('GoBeyond platform report', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 16),
+        ...metrics.map((m) => pw.Text('${m['label']}: ${m['value']}  ${m['delta'] ?? ''}')),
+        pw.SizedBox(height: 20),
+        pw.Text('Alerts', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+        ...alerts.map((a) => pw.Text(a.toString())),
+      ]));
+      final bytes = await document.save();
+      if (print) {
+        await Printing.layoutPdf(onLayout: (_) async => bytes);
+      } else {
+        final home = Platform.environment['USERPROFILE'] ?? Directory.current.path;
+        final downloads = Directory('$home\\Downloads');
+        await downloads.create(recursive: true);
+        final file = File('${downloads.path}\\gobeyond-overview-report.pdf');
+        await file.writeAsBytes(bytes, flush: true);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF saved to ${file.path}')));
+      }
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Report failed: $e'))); }
+  }
+
   void _showPreview() {
     final overview = _overview;
     if (overview == null) {
@@ -241,6 +273,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ),
             actions: [
+              ReportDocuments(title: 'Mentor report: ${report['mentorName']}', report: report, fileName: 'gobeyond-mentor-report'),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Close'),
@@ -280,6 +313,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       actions: [
         TextButton(onPressed: _showPreview, child: const Text('Preview')),
         TextButton(onPressed: _exportCsv, child: const Text('Export CSV')),
+        TextButton(onPressed: () => _pdfReport(print: false), child: const Text('Download PDF')),
+        TextButton(onPressed: () => _pdfReport(print: true), child: const Text('Print')),
         IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded)),
       ],
       child: _isLoading

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/network/dio_client.dart';
 import '../../../core/theme/app_theme.dart';
@@ -37,7 +38,8 @@ class _ProgressScreenState extends State<ProgressScreen> {
     });
 
     try {
-      final history = await _repository.getProgressHistory(search: _searchQuery);
+      final history =
+          await _repository.getProgressHistory(search: _searchQuery);
       if (!mounted) {
         return;
       }
@@ -65,6 +67,16 @@ class _ProgressScreenState extends State<ProgressScreen> {
     final normalizedQuery = _searchQuery.trim().toLowerCase();
 
     return entries.where((entry) {
+      final days = _selectedWindow == '30d'
+          ? 30
+          : _selectedWindow == '90d'
+              ? 90
+              : null;
+      if (days != null &&
+          DateTime(entry.year, entry.month + 1)
+              .isBefore(DateTime.now().subtract(Duration(days: days)))) {
+        return false;
+      }
       if (normalizedQuery.isEmpty) {
         return true;
       }
@@ -76,42 +88,13 @@ class _ProgressScreenState extends State<ProgressScreen> {
   }
 
   Future<void> _uploadPhoto() async {
-    final controller = TextEditingController();
-    final photoUrl = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Upload progress photo'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(
-              labelText: 'Photo URL',
-              hintText: 'https://...',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-
-    controller.dispose();
-
-    if (photoUrl == null || photoUrl.isEmpty || !mounted) {
-      return;
-    }
+    final photo = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, imageQuality: 75);
+    if (photo == null || !mounted) return;
 
     setState(() => _isUploading = true);
     try {
-      await _repository.uploadPhoto(photoUrl);
+      await _repository.uploadPhotoFile(await photo.readAsBytes(), photo.name);
       if (!mounted) {
         return;
       }
@@ -132,6 +115,135 @@ class _ProgressScreenState extends State<ProgressScreen> {
       if (mounted) {
         setState(() => _isUploading = false);
       }
+    }
+  }
+
+  Future<void> _addCheckIn() async {
+    final formKey = GlobalKey<FormState>();
+    final weight = TextEditingController();
+    final measurements = TextEditingController();
+    final strength = TextEditingController();
+    final conditioning = TextEditingController();
+    final saved = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+                  title: const Text('Mjesečni napredak'),
+                  content: SingleChildScrollView(
+                      child: Form(
+                          key: formKey,
+                          child:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                            TextFormField(
+                                controller: weight,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                decoration: const InputDecoration(
+                                    labelText: 'Težina (kg)'),
+                                validator: (value) {
+                                  if ((value ?? '').isEmpty) return null;
+                                  final number = double.tryParse(
+                                      value!.replaceAll(',', '.'));
+                                  return number == null ||
+                                          number < 20 ||
+                                          number > 500
+                                      ? 'Unesite 20–500 kg.'
+                                      : null;
+                                }),
+                            TextFormField(
+                                controller: measurements,
+                                decoration: const InputDecoration(
+                                    labelText: 'Mjere / parametri')),
+                            TextFormField(
+                                controller: strength,
+                                decoration:
+                                    const InputDecoration(labelText: 'Snaga')),
+                            TextFormField(
+                                controller: conditioning,
+                                decoration: const InputDecoration(
+                                    labelText: 'Kondicija')),
+                          ]))),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: const Text('Odustani')),
+                    ElevatedButton(
+                        onPressed: () {
+                          if (formKey.currentState!.validate() &&
+                              [weight, measurements, strength, conditioning]
+                                  .any((controller) =>
+                                      controller.text.trim().isNotEmpty))
+                            Navigator.pop(dialogContext, true);
+                        },
+                        child: const Text('Sačuvaj')),
+                  ],
+                )) ??
+        false;
+    if (saved && mounted) {
+      try {
+        await _repository.createProgressEntry({
+          if (weight.text.isNotEmpty)
+            'weight': double.parse(weight.text.replaceAll(',', '.')),
+          'measurements': measurements.text.trim(),
+          'strength': strength.text.trim(),
+          'conditioning': conditioning.text.trim(),
+        });
+        await _loadProgress();
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Mjesečni napredak je sačuvan.')));
+      } catch (error) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Napredak nije sačuvan: $error')));
+      }
+    }
+    for (final controller in [weight, measurements, strength, conditioning]) {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _showPlan(ActivityEntryModel entry) async {
+    try {
+      final response = await _repository.getPlanForEntry(entry.id);
+      final plan = response['plan'] as Map<String, dynamic>?;
+      if (!mounted) return;
+      await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('Plan u vrijeme napretka'),
+                content: SingleChildScrollView(
+                    child: plan == null
+                        ? const Text('Za ovaj mjesec nema objavljenog plana.')
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                                Text(
+                                    plan['focusTitle']?.toString() ??
+                                        'Trening plan',
+                                    style:
+                                        Theme.of(context).textTheme.titleLarge),
+                                Text(plan['focusSummary']?.toString() ?? ''),
+                                ...((plan['days'] as List<dynamic>? ?? [])
+                                        .whereType<Map<String, dynamic>>())
+                                    .map((day) => Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 12),
+                                          child: Text(
+                                              '${day['dayOfWeek'] ?? ''}: ${day['trainingDescription'] ?? ''}\nIshrana: ${day['nutritionDescription'] ?? ''}'),
+                                        )),
+                              ])),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Zatvori'))
+                ],
+              ));
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Historija plana nije dostupna: $error')));
     }
   }
 
@@ -206,14 +318,20 @@ class _ProgressScreenState extends State<ProgressScreen> {
                           children: [
                             Text(
                               metric.label,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
                                     color: AppTheme.textMutedColor,
                                   ),
                             ),
                             const Spacer(),
                             Text(
                               metric.value,
-                              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineMedium
+                                  ?.copyWith(
                                     color: accentColor,
                                   ),
                             ),
@@ -227,6 +345,11 @@ class _ProgressScreenState extends State<ProgressScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+              OutlinedButton.icon(
+                  onPressed: _addCheckIn,
+                  icon: const Icon(Icons.add_chart),
+                  label: const Text('Dodaj mjesečne parametre')),
+              const SizedBox(height: 10),
               AppPanel(
                 color: AppTheme.surfaceColor,
                 child: Row(
@@ -238,7 +361,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
                           Text('Photo check-in'),
                           SizedBox(height: 6),
                           Text(
-                            'Save a real photo URL to the current month progress entry.',
+                            'Odaberite fotografiju iz galerije za tekući mjesec.',
                           ),
                         ],
                       ),
@@ -277,7 +400,8 @@ class _ProgressScreenState extends State<ProgressScreen> {
               const SizedBox(height: 18),
               SectionHeader(
                 title: '${_filteredHistory.length} activity entries',
-                subtitle: 'History is filterable to match the mobile requirements around activity review.',
+                subtitle:
+                    'History is filterable to match the mobile requirements around activity review.',
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -286,7 +410,9 @@ class _ProgressScreenState extends State<ProgressScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final entry = _filteredHistory[index];
-                    final accentColor = entry.positive ? AppTheme.secondaryColor : const Color(0xFFF06D6D);
+                    final accentColor = entry.positive
+                        ? AppTheme.secondaryColor
+                        : const Color(0xFFF06D6D);
 
                     return AppPanel(
                       color: AppTheme.surfaceColor,
@@ -301,7 +427,9 @@ class _ProgressScreenState extends State<ProgressScreen> {
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: Icon(
-                              entry.positive ? Icons.trending_up_rounded : Icons.update_disabled_rounded,
+                              entry.positive
+                                  ? Icons.trending_up_rounded
+                                  : Icons.update_disabled_rounded,
                               color: accentColor,
                             ),
                           ),
@@ -310,21 +438,42 @@ class _ProgressScreenState extends State<ProgressScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(entry.title, style: Theme.of(context).textTheme.titleMedium),
+                                Text(entry.title,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium),
                                 const SizedBox(height: 6),
                                 Text(
                                   entry.subtitle,
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
                                         color: AppTheme.textMutedColor,
                                       ),
                                 ),
                                 const SizedBox(height: 10),
                                 Text(
                                   '${entry.whenLabel} | ${entry.metric}',
-                                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelLarge
+                                      ?.copyWith(
                                         color: accentColor,
                                       ),
                                 ),
+                                if (entry.photoUrl != null &&
+                                    entry.photoUrl!.isNotEmpty)
+                                  Padding(
+                                      padding: const EdgeInsets.only(top: 10),
+                                      child: Image.network(entry.photoUrl!,
+                                          height: 90,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => const Text(
+                                              'Fotografija trenutno nije dostupna.'))),
+                                TextButton(
+                                    onPressed: () => _showPlan(entry),
+                                    child: const Text('Historija plana')),
                               ],
                             ),
                           ),

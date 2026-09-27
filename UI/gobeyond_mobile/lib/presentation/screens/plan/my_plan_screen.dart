@@ -7,6 +7,7 @@ import '../../../data/repositories/training_plan_repository.dart';
 import '../../widgets/app_panel.dart';
 import '../../widgets/section_header.dart';
 import 'training_detail_screen.dart';
+import 'plan_history_screen.dart';
 
 class MyPlanScreen extends StatefulWidget {
   const MyPlanScreen({super.key});
@@ -16,7 +17,8 @@ class MyPlanScreen extends StatefulWidget {
 }
 
 class _MyPlanScreenState extends State<MyPlanScreen> {
-  final TrainingPlanRepository _repository = TrainingPlanRepository(DioClient());
+  final TrainingPlanRepository _repository =
+      TrainingPlanRepository(DioClient());
   TrainingPlanModel? _plan;
   bool _isLoading = true;
   String? _errorMessage;
@@ -92,6 +94,14 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
                   ),
             ),
             const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                      builder: (_) => const PlanHistoryScreen())),
+              icon: const Icon(Icons.history),
+              label: const Text('Historija planova'),
+            ),
+            const SizedBox(height: 12),
             if (_isLoading)
               const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (_errorMessage != null)
@@ -105,7 +115,8 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
               )
             else if (plan == null)
               const Expanded(
-                child: Center(child: Text('No published plan is available yet.')),
+                child:
+                    Center(child: Text('No published plan is available yet.')),
               )
             else ...[
               AppPanel(
@@ -120,9 +131,11 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Week ${plan.weekNumber}', style: Theme.of(context).textTheme.labelLarge),
+                    Text('Week ${plan.weekNumber}',
+                        style: Theme.of(context).textTheme.labelLarge),
                     const SizedBox(height: 10),
-                    Text(plan.focusTitle, style: Theme.of(context).textTheme.headlineMedium),
+                    Text(plan.focusTitle,
+                        style: Theme.of(context).textTheme.headlineMedium),
                     const SizedBox(height: 10),
                     Text('"${plan.motivationalQuote}"'),
                     const SizedBox(height: 16),
@@ -159,7 +172,8 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
               const SizedBox(height: 18),
               SectionHeader(
                 title: '${_filteredDays.length} sessions this week',
-                subtitle: 'Search is available here as well to satisfy filtered data browsing.',
+                subtitle:
+                    'Search is available here as well to satisfy filtered data browsing.',
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -173,7 +187,8 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
                       onTap: () {
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => TrainingDetailScreen(day: day),
+                            builder: (_) =>
+                                TrainingDetailScreen(day: day, planId: plan.id),
                           ),
                         );
                       },
@@ -188,15 +203,22 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
                                 height: 52,
                                 decoration: BoxDecoration(
                                   color: day.recovery
-                                      ? AppTheme.secondaryColor.withValues(alpha: 0.14)
-                                      : AppTheme.accentColor.withValues(alpha: 0.14),
+                                      ? AppTheme.secondaryColor
+                                          .withValues(alpha: 0.14)
+                                      : AppTheme.accentColor
+                                          .withValues(alpha: 0.14),
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                                 child: Center(
                                   child: Text(
                                     day.dayLabel,
-                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                          color: day.recovery ? AppTheme.secondaryColor : AppTheme.accentColor,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          color: day.recovery
+                                              ? AppTheme.secondaryColor
+                                              : AppTheme.accentColor,
                                         ),
                                   ),
                                 ),
@@ -206,11 +228,17 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(day.title, style: Theme.of(context).textTheme.titleLarge),
+                                    Text(day.title,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleLarge),
                                     const SizedBox(height: 6),
                                     Text(
                                       '${day.focus} | ${day.durationLabel}',
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
                                             color: AppTheme.textMutedColor,
                                           ),
                                     ),
@@ -227,7 +255,10 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
                           const SizedBox(height: 14),
                           Text(
                             day.mainBlocks.take(2).join(' | '),
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
                                   color: AppTheme.textMutedColor,
                                 ),
                           ),

@@ -19,7 +19,9 @@ class ProgressHistoryModel {
         ProgressMetricModel(
           label: 'Weight',
           value: summary['latestWeightLabel'] as String? ?? 'No data',
-          trend: summary['lastUpdatedAt'] == null ? 'No update yet' : 'Latest check-in',
+          trend: summary['lastUpdatedAt'] == null
+              ? 'No update yet'
+              : 'Latest check-in',
           accentColorValue: 0xFFF2A541,
         ),
         ProgressMetricModel(
@@ -57,16 +59,26 @@ class ProgressMetricModel {
 class ActivityEntryModel {
   const ActivityEntryModel({
     required this.title,
+    required this.id,
     required this.subtitle,
     required this.whenLabel,
     required this.metric,
+    required this.year,
+    required this.month,
+    this.photoUrl,
+    this.planSnapshot,
     this.positive = true,
   });
 
   final String title;
+  final int id;
   final String subtitle;
   final String whenLabel;
   final String metric;
+  final int year;
+  final int month;
+  final String? photoUrl;
+  final String? planSnapshot;
   final bool positive;
 
   factory ActivityEntryModel.fromJson(Map<String, dynamic> json) {
@@ -74,10 +86,15 @@ class ActivityEntryModel {
     final year = json['year'] as int? ?? 2000;
 
     return ActivityEntryModel(
+      id: json['id'] as int? ?? 0,
       title: json['title'] as String? ?? 'Progress update',
       subtitle: json['subtitle'] as String? ?? '',
       whenLabel: '${_monthName(month)} $year',
       metric: json['metric'] as String? ?? '',
+      year: year,
+      month: month,
+      photoUrl: json['photoUrl']?.toString(),
+      planSnapshot: json['planSnapshot']?.toString(),
       positive: json['positive'] as bool? ?? true,
     );
   }

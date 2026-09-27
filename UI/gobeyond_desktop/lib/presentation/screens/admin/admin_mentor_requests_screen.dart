@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/services/panel_api_service.dart';
@@ -77,6 +78,13 @@ class _AdminMentorRequestsScreenState extends State<AdminMentorRequestsScreen> {
     int id,
     String message,
   ) async {
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: Text(message.contains('rejected') ? 'Reject mentor request?' : 'Approve mentor request?'),
+      content: const Text('This decision changes the mentor account status.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Confirm'))],
+    ));
+    if (confirmed != true || !mounted) return;
     final session = context.read<SessionController>();
 
     setState(() => _isMutating = true);
@@ -121,8 +129,15 @@ class _AdminMentorRequestsScreenState extends State<AdminMentorRequestsScreen> {
                         .map(
                           (certificate) => Padding(
                             padding: const EdgeInsets.only(bottom: 10),
-                            child: Text(
-                              '${certificate['fileName']} \n${certificate['fileUrl']}',
+                            child: TextButton.icon(
+                              onPressed: () async {
+                                final uri = Uri.tryParse(certificate['fileUrl']?.toString() ?? '');
+                                if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+                                  await launchUrl(uri);
+                                }
+                              },
+                              icon: const Icon(Icons.open_in_new),
+                              label: Text(certificate['fileName']?.toString() ?? 'Open certificate'),
                             ),
                           ),
                         )

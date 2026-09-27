@@ -10,6 +10,9 @@ public class ProgressEntry : BaseEntity
     public string? Measurements { get; set; }
     public string? Strength { get; set; }
     public string? Conditioning { get; set; }
+    public int? TrainingPlanId { get; set; }
+    public string? PlanSnapshotJson { get; set; }
+    public TrainingPlan? TrainingPlan { get; set; }
 
     public ClientProfile ClientProfile { get; set; } = null!;
 }

@@ -18,6 +18,7 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
     public async Task<UserProfileDto> CreateMyProfileAsync(int userId, UpsertUserProfileRequestDto request, CancellationToken cancellationToken = default)
     {
         var user = await GetUserWithProfilesAsync(userId, cancellationToken);
+        ValidateProfileRequest(request, user.Role);
 
         ApplyBaseFields(user, request);
         await EnsureUniqueEmailAsync(user.Id, user.Email, cancellationToken);
@@ -41,6 +42,7 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
                     Price = mentorRequest.Price,
                     Status = MentorApprovalStatus.Pending
                 };
+                user.MentorProfile.TrainingTypeId = await ResolveTrainingTypeIdAsync(mentorRequest.Category, cancellationToken);
                 break;
 
             case UserRole.Client:
@@ -57,7 +59,9 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
                     Weight = clientRequest.Weight,
                     Height = clientRequest.Height,
                     Age = clientRequest.Age,
-                    FitnessLevel = clientRequest.FitnessLevel.Trim()
+                    FitnessLevel = clientRequest.FitnessLevel.Trim(),
+                    Sex = clientRequest.Sex.Trim(),
+                    TrainingExperience = clientRequest.TrainingExperience.Trim()
                 };
                 break;
 
@@ -72,6 +76,7 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
     public async Task<UserProfileDto> UpdateMyProfileAsync(int userId, UpsertUserProfileRequestDto request, CancellationToken cancellationToken = default)
     {
         var user = await GetUserWithProfilesAsync(userId, cancellationToken);
+        ValidateProfileRequest(request, user.Role);
 
         ApplyBaseFields(user, request);
         await EnsureUniqueEmailAsync(user.Id, user.Email, cancellationToken);
@@ -86,10 +91,16 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
                 {
                     Status = MentorApprovalStatus.Pending
                 };
+                var professionalDetailsChanged = user.MentorProfile.Bio != mentorRequest.Bio.Trim() ||
+                    user.MentorProfile.Age != mentorRequest.Age ||
+                    user.MentorProfile.Category != mentorRequest.Category ||
+                    user.MentorProfile.Price != mentorRequest.Price;
                 user.MentorProfile.Bio = mentorRequest.Bio.Trim();
                 user.MentorProfile.Age = mentorRequest.Age;
                 user.MentorProfile.Category = mentorRequest.Category;
+                user.MentorProfile.TrainingTypeId = await ResolveTrainingTypeIdAsync(mentorRequest.Category, cancellationToken);
                 user.MentorProfile.Price = mentorRequest.Price;
+                if (professionalDetailsChanged) user.MentorProfile.Status = MentorApprovalStatus.Pending;
                 break;
 
             case UserRole.Client:
@@ -101,6 +112,8 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
                 user.ClientProfile.Height = clientRequest.Height;
                 user.ClientProfile.Age = clientRequest.Age;
                 user.ClientProfile.FitnessLevel = clientRequest.FitnessLevel.Trim();
+                user.ClientProfile.Sex = clientRequest.Sex.Trim();
+                user.ClientProfile.TrainingExperience = clientRequest.TrainingExperience.Trim();
                 break;
 
             case UserRole.Admin:
@@ -149,6 +162,32 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
             : request.ProfileImageUrl.Trim();
     }
 
+    private static void ValidateProfileRequest(UpsertUserProfileRequestDto request, UserRole role)
+    {
+        if (string.IsNullOrWhiteSpace(request.FirstName) || request.FirstName.Trim().Length < 2 ||
+            string.IsNullOrWhiteSpace(request.LastName) || request.LastName.Trim().Length < 2 ||
+            string.IsNullOrWhiteSpace(request.Email) ||
+            !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(request.Email))
+            throw new InvalidOperationException("Profile requires first and last name (2+ characters) and a valid email address.");
+
+        if (role == UserRole.Mentor)
+        {
+            var mentor = request.MentorProfile;
+            if (mentor is null || string.IsNullOrWhiteSpace(mentor.Bio) || mentor.Bio.Trim().Length < 10 ||
+                mentor.Age is < 18 or > 80 || mentor.Price is <= 0 or > 10000 || !Enum.IsDefined(mentor.Category))
+                throw new InvalidOperationException("Mentor profile requires bio (10+ characters), age 18-80, valid category and positive price.");
+        }
+        if (role == UserRole.Client)
+        {
+            var client = request.ClientProfile;
+            if (client is null || client.Age is < 18 or > 100 || client.Weight is <= 0 or > 1000 ||
+                client.Height is <= 0 or > 300 || string.IsNullOrWhiteSpace(client.FitnessLevel) ||
+                !new[] { "Male", "Female", "Other" }.Contains(client.Sex, StringComparer.OrdinalIgnoreCase) ||
+                !new[] { "Beginner", "Intermediate", "Advanced" }.Contains(client.TrainingExperience, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Client profile requires age 18-100, valid weight/height, fitness level, sex and training experience.");
+        }
+    }
+
     private async Task EnsureUniqueEmailAsync(int userId, string normalizedEmail, CancellationToken cancellationToken)
     {
         var exists = await dbContext.Users
@@ -158,6 +197,13 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
         {
             throw new InvalidOperationException("Email is already registered.");
         }
+    }
+
+    private async Task<int> ResolveTrainingTypeIdAsync(MentorCategory category, CancellationToken cancellationToken)
+    {
+        var id = await dbContext.TrainingTypes.Where(x => x.Name == category.ToString())
+            .Select(x => x.Id).FirstOrDefaultAsync(cancellationToken);
+        return id > 0 ? id : throw new InvalidOperationException("Selected training type does not exist.");
     }
 
     private static UserProfileDto MapToDto(User user)
@@ -181,7 +227,9 @@ public class UserProfileService(GoBeyondDbContext dbContext) : IUserProfileServi
                 user.ClientProfile.Weight,
                 user.ClientProfile.Height,
                 user.ClientProfile.Age,
-                user.ClientProfile.FitnessLevel);
+                user.ClientProfile.FitnessLevel,
+                user.ClientProfile.Sex,
+                user.ClientProfile.TrainingExperience);
         }
 
         return new UserProfileDto(

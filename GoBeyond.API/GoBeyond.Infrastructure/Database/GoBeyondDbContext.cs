@@ -18,6 +18,10 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<TrainingType> TrainingTypes => Set<TrainingType>();
+    public DbSet<TrainingSession> TrainingSessions => Set<TrainingSession>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<UserActivity> UserActivities => Set<UserActivity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -38,6 +42,17 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
         modelBuilder.Entity<MentorProfile>()
             .Property(x => x.Price)
             .HasPrecision(10, 2);
+        modelBuilder.Entity<MentorProfile>()
+            .HasOne(x => x.TrainingType)
+            .WithMany(x => x.Mentors)
+            .HasForeignKey(x => x.TrainingTypeId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrainingType>(entity =>
+        {
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.Description).HasMaxLength(500).IsRequired();
+        });
 
         modelBuilder.Entity<ClientProfile>()
             .HasOne(x => x.User)
@@ -78,6 +93,8 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             .WithMany(x => x.TrainingPlans)
             .HasForeignKey(x => x.SubscriptionId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrainingPlan>()
+            .HasIndex(x => new { x.SubscriptionId, x.WeekNumber }).IsUnique();
 
         modelBuilder.Entity<TrainingPlan>()
             .HasOne(x => x.MentorProfile)
@@ -96,6 +113,8 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             .WithMany(x => x.DayPlans)
             .HasForeignKey(x => x.TrainingPlanId)
             .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<DayPlan>()
+            .HasIndex(x => new { x.TrainingPlanId, x.DayOfWeek }).IsUnique();
 
         modelBuilder.Entity<ProgressEntry>()
             .HasOne(x => x.ClientProfile)
@@ -104,6 +123,44 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
         modelBuilder.Entity<ProgressEntry>()
             .Property(x => x.Weight)
             .HasPrecision(6, 2);
+        modelBuilder.Entity<ProgressEntry>()
+            .HasIndex(x => new { x.ClientProfileId, x.Year, x.Month }).IsUnique();
+        modelBuilder.Entity<ProgressEntry>()
+            .HasOne(x => x.TrainingPlan)
+            .WithMany()
+            .HasForeignKey(x => x.TrainingPlanId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<TrainingSession>()
+            .HasOne(x => x.ClientProfile)
+            .WithMany()
+            .HasForeignKey(x => x.ClientProfileId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrainingSession>()
+            .HasOne(x => x.TrainingPlan)
+            .WithMany(x => x.Sessions)
+            .HasForeignKey(x => x.TrainingPlanId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrainingSession>()
+            .HasIndex(x => new { x.ClientProfileId, x.DayPlanId }).IsUnique();
+        modelBuilder.Entity<TrainingSession>()
+            .HasOne(x => x.DayPlan)
+            .WithMany()
+            .HasForeignKey(x => x.DayPlanId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OutboxMessage>()
+            .HasOne(x => x.User)
+            .WithMany(x => x.OutboxMessages)
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OutboxMessage>().HasIndex(x => x.SentAt);
+        modelBuilder.Entity<UserActivity>()
+            .HasOne(x => x.User)
+            .WithMany(x => x.Activities)
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<UserActivity>()
+            .HasIndex(x => new { x.UserId, x.Day }).IsUnique();
 
         modelBuilder.Entity<Review>()
             .HasOne(x => x.ClientProfile)

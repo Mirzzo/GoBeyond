@@ -31,12 +31,22 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
     _QuestionPrompt(
       title: 'Health issues',
       subtitle: 'Choose the closest match for current limitations.',
-      options: ['None', 'Minor joint pain', 'Recovery issues', 'Need modifications'],
+      options: [
+        'None',
+        'Minor joint pain',
+        'Recovery issues',
+        'Need modifications'
+      ],
     ),
     _QuestionPrompt(
       title: 'Medications',
       subtitle: 'Any regular medication or treatment to note?',
-      options: ['None', 'Occasional pain relief', 'Daily prescription', 'Prefer to explain later'],
+      options: [
+        'None',
+        'Occasional pain relief',
+        'Daily prescription',
+        'Prefer to explain later'
+      ],
     ),
     _QuestionPrompt(
       title: 'Weekly availability',
@@ -46,7 +56,12 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
     _QuestionPrompt(
       title: 'Physical activity level',
       subtitle: 'How would you describe your current base level?',
-      options: ['Beginner', 'Intermediate', 'Advanced', 'Returning after break'],
+      options: [
+        'Beginner',
+        'Intermediate',
+        'Advanced',
+        'Returning after break'
+      ],
     ),
   ];
 
@@ -91,7 +106,9 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  mentor == null ? 'Plan fit questionnaire' : 'Questionnaire for ${mentor.name}',
+                  mentor == null
+                      ? 'Plan fit questionnaire'
+                      : 'Questionnaire for ${mentor.name}',
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 10),

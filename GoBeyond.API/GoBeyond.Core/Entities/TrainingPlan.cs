@@ -15,4 +15,5 @@ public class TrainingPlan : BaseEntity
     public MentorProfile MentorProfile { get; set; } = null!;
     public ClientProfile ClientProfile { get; set; } = null!;
     public ICollection<DayPlan> DayPlans { get; set; } = new List<DayPlan>();
+    public ICollection<TrainingSession> Sessions { get; set; } = new List<TrainingSession>();
 }

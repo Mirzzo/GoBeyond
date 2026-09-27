@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:dio/dio.dart';
 
 import '../../data/repositories/auth_repository.dart';
 import '../network/dio_client.dart';
@@ -42,19 +43,23 @@ class AuthController extends ChangeNotifier {
 
     final rawUser = await _storage.read(key: _userKey);
     if (rawUser != null && rawUser.isNotEmpty) {
-      _user = Map<String, dynamic>.from(jsonDecode(rawUser) as Map<String, dynamic>);
+      _user = Map<String, dynamic>.from(
+          jsonDecode(rawUser) as Map<String, dynamic>);
     }
 
     final rawProfile = await _storage.read(key: _profileKey);
     if (rawProfile != null && rawProfile.isNotEmpty) {
-      _profile = Map<String, dynamic>.from(jsonDecode(rawProfile) as Map<String, dynamic>);
+      _profile = Map<String, dynamic>.from(
+          jsonDecode(rawProfile) as Map<String, dynamic>);
     }
 
     if (_accessToken != null) {
       try {
         await refreshProfile();
-      } catch (_) {
-        await logout(notify: false);
+      } on DioException catch (error) {
+        if (error.response?.statusCode == 401) {
+          await logout(notify: false);
+        }
       }
     }
 
@@ -154,10 +159,14 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  Future<void> changePassword(String currentPassword, String newPassword) =>
+      _repository.changePassword(currentPassword, newPassword);
+
   Future<void> _applyAuthResponse(Map<String, dynamic> response) async {
     _accessToken = response['accessToken']?.toString();
     _refreshToken = response['refreshToken']?.toString();
     _user = Map<String, dynamic>.from(response['user'] as Map<String, dynamic>);
+    await _persistSession();
     _profile = await _repository.getMyProfile();
     await _persistSession();
     notifyListeners();
@@ -182,6 +191,15 @@ class AuthController extends ChangeNotifier {
   }
 
   String _extractMessage(Object error) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map && data['message'] != null)
+        return data['message'].toString();
+      if (data is Map && data['title'] != null) return data['title'].toString();
+      return error.response?.statusCode == null
+          ? 'Nema veze sa serverom. Provjerite API adresu i mrežu.'
+          : 'Zahtjev nije uspio (${error.response?.statusCode}).';
+    }
     final raw = error.toString();
     if (raw.contains('message')) {
       return raw;

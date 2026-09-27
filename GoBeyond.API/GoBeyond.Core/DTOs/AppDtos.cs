@@ -6,6 +6,58 @@ public sealed record FileReferenceDto(
     string FileName,
     string FileUrl);
 
+public sealed record TrainingTypeDto(int Id, string Name, string Description);
+
+public sealed class UpsertTrainingTypeRequestDto
+{
+    [Required, StringLength(80, MinimumLength = 3)]
+    public string Name { get; init; } = string.Empty;
+
+    [Required, StringLength(500, MinimumLength = 5)]
+    public string Description { get; init; } = string.Empty;
+}
+
+public sealed class UpdateAdminUserRequestDto
+{
+    [Required, StringLength(100, MinimumLength = 2)]
+    public string FirstName { get; init; } = string.Empty;
+
+    [Required, StringLength(100, MinimumLength = 2)]
+    public string LastName { get; init; } = string.Empty;
+
+    [Required, EmailAddress]
+    public string Email { get; init; } = string.Empty;
+
+    [Required]
+    public string Role { get; init; } = string.Empty;
+
+    public string? Bio { get; init; }
+    public int? Age { get; init; }
+    public string? Category { get; init; }
+    public decimal? Price { get; init; }
+    public decimal? Weight { get; init; }
+    public decimal? Height { get; init; }
+    public string? FitnessLevel { get; init; }
+    public string? Sex { get; init; }
+    public string? TrainingExperience { get; init; }
+    public string? CertificateFileName { get; init; }
+    public string? CertificateFileUrl { get; init; }
+}
+
+public sealed class ResetUserPasswordRequestDto
+{
+    [Required, MinLength(8)]
+    public string NewPassword { get; init; } = string.Empty;
+}
+
+public sealed record TrainingSessionDto(int Id, int TrainingPlanId, int DayPlanId, int Repetitions, DateTime CompletedAt);
+
+public sealed class CompleteTrainingDayRequestDto
+{
+    [Range(0, 10000)]
+    public int Repetitions { get; init; }
+}
+
 public sealed record OverviewMetricDto(
     string Label,
     string Value,
@@ -81,7 +133,21 @@ public sealed record MentorReportDto(
     decimal TotalRevenue,
     double AverageRating,
     int ReviewCount,
-    IReadOnlyList<MentorClientSnapshotDto> RecentClients);
+    IReadOnlyList<MentorClientSnapshotDto> RecentClients,
+    decimal MonthlyRevenue = 0,
+    int TimeOnPlatformMinutes = 0);
+
+public sealed record ClientReportDto(
+    int UserId,
+    string FullName,
+    string Email,
+    int ActiveSubscriptions,
+    int TotalSubscriptions,
+    decimal TotalPaid,
+    int ProgressCheckIns,
+    int CompletedTrainingDays,
+    DateTime? LastProgressAt,
+    int TimeOnPlatformMinutes);
 
 public sealed record MentorSummaryDto(
     int Id,
@@ -181,6 +247,8 @@ public sealed record ProgressEntryDto(
     string Metric,
     bool Positive);
 
+public sealed record ProgressEntryPlanDto(int ProgressEntryId, TrainingPlanDetailDto? Plan);
+
 public sealed record ProgressSummaryDto(
     string LatestWeightLabel,
     string CheckInCountLabel,
@@ -243,7 +311,8 @@ public sealed record DayPlanDto(
     string TrainingDuration,
     string TrainingDescription,
     string NutritionDuration,
-    string NutritionDescription);
+    string NutritionDescription,
+    int? Repetitions = null);
 
 public sealed record TrainingPlanSummaryDto(
     int Id,
@@ -334,6 +403,8 @@ public sealed class UpdateMentorProfileRequestDto
 
     [Range(typeof(decimal), "0.01", "10000")]
     public decimal Price { get; init; }
+
+    public int? TrainingTypeId { get; init; }
 }
 
 public sealed class UploadCertificateRequestDto
@@ -406,6 +477,12 @@ public sealed class UploadProgressPhotoRequestDto
     [Required]
     [MinLength(3)]
     public string PhotoUrl { get; init; } = string.Empty;
+
+    [Range(2000, 9999)]
+    public int? Year { get; init; }
+
+    [Range(1, 12)]
+    public int? Month { get; init; }
 }
 
 public sealed class CreateReviewRequestDto

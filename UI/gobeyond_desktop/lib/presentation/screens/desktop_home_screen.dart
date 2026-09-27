@@ -8,6 +8,7 @@ import 'admin/admin_dashboard_screen.dart';
 import 'admin/admin_mentor_requests_screen.dart';
 import 'admin/admin_mentors_screen.dart';
 import 'admin/admin_subscriptions_screen.dart';
+import 'admin/admin_training_types_screen.dart';
 import 'mentor/mentor_collaboration_requests_screen.dart';
 import 'mentor/mentor_create_plan_screen.dart';
 import 'mentor/mentor_published_plans_screen.dart';
@@ -61,6 +62,11 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       label: 'Dashboard',
       icon: Icons.dashboard,
       page: AdminDashboardScreen(),
+    ),
+    _PanelDestination(
+      label: 'Training Types',
+      icon: Icons.category,
+      page: AdminTrainingTypesScreen(),
     ),
   ];
 
@@ -190,7 +196,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                    child: page,
+                    child: SingleChildScrollView(child: page),
                   ),
                 ),
               ],

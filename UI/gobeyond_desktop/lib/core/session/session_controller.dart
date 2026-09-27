@@ -1,18 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../models/auth_response.dart';
 import '../models/auth_user.dart';
+import '../models/app_role.dart';
 import '../models/user_profile.dart';
 import '../network/api_client.dart';
 import '../services/auth_api_service.dart';
 
-class SessionController extends ChangeNotifier {
+class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   SessionController()
-      : _authApiService = AuthApiService(ApiClient());
+      : _authApiService = AuthApiService(ApiClient()) {
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   static const _tokenKey = 'gb_access_token';
   static const _refreshTokenKey = 'gb_refresh_token';
@@ -20,6 +25,8 @@ class SessionController extends ChangeNotifier {
   static const _sessionFileName = '.gobeyond_desktop_session.json';
 
   final AuthApiService _authApiService;
+  Timer? _heartbeatTimer;
+  bool _appActive = true;
 
   String? _accessToken;
   String? _refreshToken;
@@ -36,19 +43,28 @@ class SessionController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
 
   Future<void> hydrate() async {
-    final file = await _sessionFile();
-    if (await file.exists()) {
-      final rawContent = await file.readAsString();
-      if (rawContent.isNotEmpty) {
-        final payload = jsonDecode(rawContent) as Map<String, dynamic>;
-        _accessToken = payload[_tokenKey] as String?;
-        _refreshToken = payload[_refreshTokenKey] as String?;
-
-        final rawUser = payload[_userKey];
-        if (rawUser is Map<String, dynamic>) {
-          _user = AuthUser.fromJson(rawUser);
+    try {
+      final file = await _sessionFile();
+      if (await file.exists()) {
+        final rawContent = await file.readAsString();
+        if (rawContent.isNotEmpty) {
+          final payload = jsonDecode(rawContent) as Map<String, dynamic>;
+          _refreshToken = payload[_refreshTokenKey] as String?;
+          if (_refreshToken != null) {
+            final refreshed = await _refreshSession();
+            if (!refreshed) {
+              _accessToken = null;
+              _refreshToken = null;
+              _user = null;
+              await file.delete();
+            }
+          }
         }
       }
+    } catch (_) {
+      _accessToken = null;
+      _refreshToken = null;
+      _user = null;
     }
 
     _isHydrated = true;
@@ -61,6 +77,11 @@ class SessionController extends ChangeNotifier {
 
     try {
       final authResponse = await _authApiService.login(email: email, password: password);
+      if (authResponse.user.role == AppRole.client) {
+        _errorMessage = 'Client accounts use the mobile application.';
+        notifyListeners();
+        return false;
+      }
       _errorMessage = null;
       await _applyAuthResponse(authResponse);
       return true;
@@ -103,6 +124,7 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> logout({String? message}) async {
+    _heartbeatTimer?.cancel();
     _accessToken = null;
     _refreshToken = null;
     _user = null;
@@ -160,12 +182,37 @@ class SessionController extends ChangeNotifier {
     _accessToken = authResponse.accessToken;
     _refreshToken = authResponse.refreshToken;
     _user = authResponse.user;
+    _startHeartbeat();
 
     await _persistSession();
 
     if (notify) {
       notifyListeners();
     }
+  }
+
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    if (!_appActive || !isAuthenticated) return;
+    _heartbeatTimer = Timer.periodic(const Duration(minutes: 1), (_) async {
+      try {
+        await runAuthenticated((token) => ApiClient().dio.post<void>('/api/activity/heartbeat',
+          options: Options(headers: {'Authorization': 'Bearer $token'})));
+      } catch (_) { /* Heartbeat must not interrupt panel work. */ }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appActive = state == AppLifecycleState.resumed;
+    _startHeartbeat();
+  }
+
+  @override
+  void dispose() {
+    _heartbeatTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _persistSession() async {

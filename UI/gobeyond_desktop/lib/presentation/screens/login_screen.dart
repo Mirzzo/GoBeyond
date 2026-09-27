@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/session/session_controller.dart';
+import 'mentor_register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,8 +12,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController(text: 'admin@gobeyond.local');
-  final _passwordController = TextEditingController(text: 'Admin123!');
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   @override
@@ -71,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 TextFormField(
                   controller: _emailController,
                   decoration: const InputDecoration(labelText: 'Email'),
-                  validator: (value) => (value == null || value.isEmpty) ? 'Email is required.' : null,
+                  validator: (value) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value?.trim() ?? '') ? null : 'Enter a valid email address.',
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
@@ -106,6 +107,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         : const Text('Login'),
                   ),
                 ),
+                const SizedBox(height: 12),
+                SizedBox(width: double.infinity, child: OutlinedButton(
+                  onPressed: session.isBusy ? null : () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MentorRegisterScreen())),
+                  child: const Text('Register as mentor'),
+                )),
               ],
             ),
           ),

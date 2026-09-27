@@ -23,6 +23,73 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
   List<Map<String, dynamic>> _reviews = const [];
   bool _isLoadingReviews = true;
 
+  Future<void> _writeReview() async {
+    final formKey = GlobalKey<FormState>();
+    final comment = TextEditingController();
+    int rating = 5;
+    final submitted = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => StatefulBuilder(
+                  builder: (context, setDialogState) => AlertDialog(
+                    title: const Text('Ocijenite saradnju'),
+                    content: Form(
+                        key: formKey,
+                        child:
+                            Column(mainAxisSize: MainAxisSize.min, children: [
+                          DropdownButtonFormField<int>(
+                            initialValue: rating,
+                            decoration:
+                                const InputDecoration(labelText: 'Ocjena'),
+                            items: [1, 2, 3, 4, 5]
+                                .map((value) => DropdownMenuItem(
+                                    value: value, child: Text('$value / 5')))
+                                .toList(),
+                            onChanged: (value) =>
+                                setDialogState(() => rating = value ?? 5),
+                          ),
+                          TextFormField(
+                            controller: comment,
+                            maxLines: 3,
+                            maxLength: 500,
+                            decoration:
+                                const InputDecoration(labelText: 'Komentar'),
+                            validator: (value) =>
+                                (value ?? '').trim().length < 4
+                                    ? 'Unesite najmanje 4 znaka.'
+                                    : null,
+                          ),
+                        ])),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, false),
+                          child: const Text('Odustani')),
+                      ElevatedButton(
+                          onPressed: () {
+                            if (formKey.currentState!.validate())
+                              Navigator.pop(dialogContext, true);
+                          },
+                          child: const Text('Objavi')),
+                    ],
+                  ),
+                )) ??
+        false;
+    if (submitted && mounted) {
+      try {
+        await _repository.saveReview(
+            widget.mentor.id, rating, comment.text.trim());
+        await _loadReviews();
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Recenzija je sačuvana.')));
+      } catch (error) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Recenzija nije sačuvana: $error')));
+      }
+    }
+    comment.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -58,9 +125,6 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
   Widget build(BuildContext context) {
     final mentor = widget.mentor;
     final accentColor = Color(mentor.accentColorValue);
-    final reviewQuote = _reviews.isEmpty
-        ? mentor.reviewQuote
-        : _reviews.first['comment']?.toString() ?? mentor.reviewQuote;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Mentor profile')),
@@ -86,7 +150,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                         children: [
                           CircleAvatar(
                             radius: 32,
-                            backgroundColor: accentColor.withValues(alpha: 0.18),
+                            backgroundColor:
+                                accentColor.withValues(alpha: 0.18),
                             child: Text(
                               mentor.name
                                   .split(' ')
@@ -108,12 +173,17 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                               children: [
                                 Text(
                                   mentor.name,
-                                  style: Theme.of(context).textTheme.headlineMedium,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium,
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
                                   '${mentor.category} | ${mentor.city}',
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
                                         color: AppTheme.textMutedColor,
                                       ),
                                 ),
@@ -121,7 +191,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(16),
@@ -134,7 +205,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                         ],
                       ),
                       const SizedBox(height: 18),
-                      Text(mentor.headline, style: Theme.of(context).textTheme.titleMedium),
+                      Text(mentor.headline,
+                          style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 12),
                       Text(mentor.about),
                       const SizedBox(height: 18),
@@ -142,8 +214,12 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                         spacing: 10,
                         runSpacing: 10,
                         children: [
-                          _TagStat(label: mentor.nextStartLabel, accentColor: accentColor),
-                          _TagStat(label: mentor.responseTimeLabel, accentColor: accentColor),
+                          _TagStat(
+                              label: mentor.nextStartLabel,
+                              accentColor: accentColor),
+                          _TagStat(
+                              label: mentor.responseTimeLabel,
+                              accentColor: accentColor),
                           _TagStat(
                             label: '${mentor.activeClients} active clients',
                             accentColor: accentColor,
@@ -166,7 +242,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                       .map(
                         (specialty) => Chip(
                           label: Text(specialty),
-                          avatar: Icon(Icons.check_rounded, color: accentColor, size: 18),
+                          avatar: Icon(Icons.check_rounded,
+                              color: accentColor, size: 18),
                         ),
                       )
                       .toList(),
@@ -174,7 +251,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                 const SizedBox(height: 24),
                 const SectionHeader(
                   title: 'Client feedback',
-                  subtitle: 'Short proof of the coaching style before you subscribe.',
+                  subtitle:
+                      'Short proof of the coaching style before you subscribe.',
                 ),
                 const SizedBox(height: 12),
                 AppPanel(
@@ -184,29 +262,34 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                     children: [
                       Text(
                         'Rating ${mentor.rating.toStringAsFixed(1)}/5',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: accentColor,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: accentColor,
+                                ),
                       ),
                       const SizedBox(height: 10),
                       if (_isLoadingReviews)
                         const CircularProgressIndicator()
+                      else if (_reviews.isEmpty)
+                        const Text('Još nema recenzija.')
                       else
-                        Text('"$reviewQuote"'),
+                        ..._reviews.map((review) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Text(
+                                  '${review['clientName'] ?? 'Klijent'} • ${review['rating']}/5\n${review['comment'] ?? ''}'),
+                            )),
                       const SizedBox(height: 12),
-                      Text(
-                        'Typical clients work in 4-8 week blocks with one primary focus per cycle.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: AppTheme.textMutedColor,
-                            ),
-                      ),
+                      OutlinedButton(
+                          onPressed: _writeReview,
+                          child: const Text('Napiši recenziju')),
                     ],
                   ),
                 ),
                 const SizedBox(height: 24),
                 const SectionHeader(
                   title: 'Next step',
-                  subtitle: 'The flow is mentor detail -> questionnaire -> subscription.',
+                  subtitle:
+                      'The flow is mentor detail -> questionnaire -> subscription.',
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -216,7 +299,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute<void>(
-                              builder: (_) => SubscriptionScreen(mentor: mentor),
+                              builder: (_) =>
+                                  SubscriptionScreen(mentor: mentor),
                             ),
                           );
                         },
@@ -229,7 +313,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute<void>(
-                              builder: (_) => QuestionnaireScreen(mentor: mentor),
+                              builder: (_) =>
+                                  QuestionnaireScreen(mentor: mentor),
                             ),
                           );
                         },

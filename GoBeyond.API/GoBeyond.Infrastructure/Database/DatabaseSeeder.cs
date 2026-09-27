@@ -10,14 +10,22 @@ public class DatabaseSeeder(
     IPasswordHasherService passwordHasherService) : IDatabaseSeeder
 {
     private const string AdminEmail = "admin@gobeyond.local";
-    private const string AdminPassword = "Admin123!";
+    private const string AdminPassword = "test";
     private const string MentorEmail = "mentor@gobeyond.local";
-    private const string MentorPassword = "Mentor123!";
+    private const string MentorPassword = "test";
     private const string ClientEmail = "client@gobeyond.local";
-    private const string ClientPassword = "Client123!";
+    private const string ClientPassword = "test";
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureTrainingTypesAsync(cancellationToken);
+        if (await dbContext.Users.AnyAsync(x => x.Email == AdminEmail, cancellationToken))
+        {
+            await BackfillTrainingTypesAsync(cancellationToken);
+            await BackfillClientDemographicsAsync(cancellationToken);
+            return;
+        }
+
         var admin = await EnsureUserAsync(
             email: AdminEmail,
             password: AdminPassword,
@@ -133,7 +141,7 @@ public class DatabaseSeeder(
             SubscriptionStatus.Active,
             today.AddDays(-21),
             today.AddDays(7),
-            mila.MentorProfile.Price,
+            mila.MentorProfile!.Price,
             new QuestionnaireSeed(
                 "Build strength while dropping body fat",
                 "4 training sessions weekly",
@@ -181,7 +189,7 @@ public class DatabaseSeeder(
             SubscriptionStatus.Expired,
             today.AddDays(-90),
             today.AddDays(-60),
-            lejla.MentorProfile.Price,
+            lejla.MentorProfile!.Price,
             new QuestionnaireSeed(
                 "Reset habits after a long break",
                 "3 sessions weekly",
@@ -282,7 +290,6 @@ public class DatabaseSeeder(
         await EnsureReviewAsync(luka.ClientProfile!, mila.MentorProfile!, 5, "The first coach who adjusted my plan when my week fell apart.", cancellationToken);
         await EnsureReviewAsync(ivan.ClientProfile!, mila.MentorProfile!, 4, "Clear cues and realistic weekly structure.", cancellationToken);
         await EnsureReviewAsync(luka.ClientProfile!, lejla.MentorProfile!, 5, "Structured habit reset without unrealistic volume.", cancellationToken);
-        await EnsureReviewAsync(ana.ClientProfile!, amir.MentorProfile!, 4, "Mobility progressions were easy to follow.", cancellationToken);
 
         EnsureNotification(
             luka.Id,
@@ -314,6 +321,48 @@ public class DatabaseSeeder(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
+
+        await BackfillTrainingTypesAsync(cancellationToken);
+    }
+
+    private async Task EnsureTrainingTypesAsync(CancellationToken cancellationToken)
+    {
+        var defaults = new[]
+        {
+            ("Calisthenics", "Bodyweight strength, mobility and technique."),
+            ("Weightlifting", "Strength and Olympic lifting technique."),
+            ("Hybrid", "Combined strength, conditioning and recovery.")
+        };
+        foreach (var (name, description) in defaults)
+        {
+            if (!await dbContext.TrainingTypes.AnyAsync(x => x.Name == name, cancellationToken))
+                dbContext.TrainingTypes.Add(new TrainingType { Name = name, Description = description });
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task BackfillTrainingTypesAsync(CancellationToken cancellationToken)
+    {
+        var types = await dbContext.TrainingTypes.ToListAsync(cancellationToken);
+        var mentors = await dbContext.MentorProfiles.Where(x => x.TrainingTypeId == null).ToListAsync(cancellationToken);
+        foreach (var mentor in mentors)
+            mentor.TrainingTypeId = types.FirstOrDefault(x => x.Name == mentor.Category.ToString())?.Id;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task BackfillClientDemographicsAsync(CancellationToken cancellationToken)
+    {
+        var clients = await dbContext.ClientProfiles.Include(x => x.User)
+            .Where(x => x.Sex == "" || x.TrainingExperience == "")
+            .ToListAsync(cancellationToken);
+        foreach (var client in clients)
+        {
+            if (string.IsNullOrWhiteSpace(client.TrainingExperience))
+                client.TrainingExperience = string.IsNullOrWhiteSpace(client.FitnessLevel) ? "Beginner" : client.FitnessLevel;
+            if (string.IsNullOrWhiteSpace(client.Sex))
+                client.Sex = client.User.FirstName is "Luka" or "Ivan" ? "Male" : "Other";
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static void ConfigureMentorProfile(
@@ -344,6 +393,12 @@ public class DatabaseSeeder(
         user.ClientProfile.Height = height;
         user.ClientProfile.Age = age;
         user.ClientProfile.FitnessLevel = fitnessLevel;
+        user.ClientProfile.TrainingExperience = fitnessLevel;
+        user.ClientProfile.Sex = user.FirstName switch
+        {
+            "Luka" or "Ivan" => "Male",
+            _ => "Female"
+        };
     }
 
     private static void EnsureCertificate(MentorProfile mentorProfile, string fileName, string fileUrl)

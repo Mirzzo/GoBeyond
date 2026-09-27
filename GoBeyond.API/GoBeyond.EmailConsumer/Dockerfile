@@ -1,7 +1,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
-COPY GoBeyond.sln ./
+COPY GoBeyond.API/GoBeyond.sln GoBeyond.API/
+COPY appsettings.Shared.json ./
 COPY GoBeyond.API/GoBeyond.EmailConsumer/GoBeyond.EmailConsumer.csproj GoBeyond.API/GoBeyond.EmailConsumer/
 COPY GoBeyond.API/GoBeyond.Contracts/GoBeyond.Contracts.csproj GoBeyond.API/GoBeyond.Contracts/
 
