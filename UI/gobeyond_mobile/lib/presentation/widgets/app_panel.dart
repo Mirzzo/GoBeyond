@@ -2,55 +2,42 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 
+/// The large rounded dark panel used throughout every mockup (home card,
+/// mentor card, plan card, forms...).
 class AppPanel extends StatelessWidget {
   const AppPanel({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(20),
     this.color,
-    this.gradient,
     this.onTap,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color? color;
-  final Gradient? gradient;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    const radius = 28.0;
-
-    final panel = Ink(
+    final panel = Container(
       decoration: BoxDecoration(
-        color: color ?? AppTheme.panelColor,
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: const Color(0xFF2B363C)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x22000000),
-            blurRadius: 28,
-            offset: Offset(0, 14),
-          ),
-        ],
+        color: color ?? AppTheme.panel,
+        borderRadius: BorderRadius.circular(AppTheme.panelRadius),
       ),
-      child: Padding(
-        padding: padding,
-        child: child,
-      ),
+      padding: padding,
+      child: child,
     );
+
+    if (onTap == null) return panel;
 
     return Material(
       color: Colors.transparent,
-      child: onTap == null
-          ? panel
-          : InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(radius),
-              child: panel,
-            ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppTheme.panelRadius),
+        child: panel,
+      ),
     );
   }
 }

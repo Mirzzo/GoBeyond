@@ -1,83 +1,83 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../data/models/mentor_model.dart';
-import '../../widgets/app_panel.dart';
-import '../subscription/subscription_screen.dart';
+import '../../../core/utils/validators.dart';
+import '../../../data/models/mentor_summary.dart';
+import '../../../data/models/questionnaire.dart';
+import '../../widgets/app_modal_page.dart';
+import '../../widgets/primary_button.dart';
+import 'subscription_confirm_screen.dart';
 
+class _QuestionSpec {
+  const _QuestionSpec(this.label, this.key);
+
+  final String label;
+  final String key;
+}
+
+const _questions = [
+  _QuestionSpec(
+    'Opišite vaš glavni cilj? (mršavljenje, povećanje mišićne mase, poboljšanje kondicije, snage, izdržljivosti...)',
+    'primaryGoal',
+  ),
+  _QuestionSpec('Koliko vremena želite posvetiti ostvarivanju tog cilja?',
+      'timeCommitment'),
+  _QuestionSpec('Imate li zdravstvenih problema koji mogu utjecati na trening?',
+      'healthIssues'),
+  _QuestionSpec(
+    'Da li ste trenutno pod terapijom ili lijekovima koji mogu utjecati na fizičku aktivnost?',
+    'medications',
+  ),
+  _QuestionSpec(
+      'Koliko puta sedmično realno možete trenirati?', 'weeklySessions'),
+  _QuestionSpec(
+    'Koliko često se baviš fizičkom aktivnošću van treninga (šetnje, sportovi, rekreacija)?',
+    'outsideActivity',
+  ),
+];
+
+/// Mockup 09: KUPI PLAN questionnaire — 6 free-text answers (2–500 chars)
+/// that help the mentor build a personalized plan.
 class QuestionnaireScreen extends StatefulWidget {
-  const QuestionnaireScreen({super.key, this.mentor});
+  const QuestionnaireScreen({super.key, required this.mentor});
 
-  final MentorModel? mentor;
+  final MentorDetail mentor;
 
   @override
   State<QuestionnaireScreen> createState() => _QuestionnaireScreenState();
 }
 
 class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
-  final Map<int, String> _answers = <int, String>{};
+  final _formKey = GlobalKey<FormState>();
+  final Map<String, TextEditingController> _controllers = {
+    for (final q in _questions) q.key: TextEditingController(),
+  };
 
-  static const _questions = <_QuestionPrompt>[
-    _QuestionPrompt(
-      title: 'Primary goal',
-      subtitle: 'What should the next coaching block solve first?',
-      options: ['Fat loss', 'Strength', 'Consistency', 'Technique'],
-    ),
-    _QuestionPrompt(
-      title: 'Time commitment',
-      subtitle: 'How much realistic time can you invest each week?',
-      options: ['2 short sessions', '3 sessions', '4 sessions', '5+ sessions'],
-    ),
-    _QuestionPrompt(
-      title: 'Health issues',
-      subtitle: 'Choose the closest match for current limitations.',
-      options: [
-        'None',
-        'Minor joint pain',
-        'Recovery issues',
-        'Need modifications'
-      ],
-    ),
-    _QuestionPrompt(
-      title: 'Medications',
-      subtitle: 'Any regular medication or treatment to note?',
-      options: [
-        'None',
-        'Occasional pain relief',
-        'Daily prescription',
-        'Prefer to explain later'
-      ],
-    ),
-    _QuestionPrompt(
-      title: 'Weekly availability',
-      subtitle: 'When can you most reliably train?',
-      options: ['Weekdays', 'Evenings', 'Weekends', 'Flexible'],
-    ),
-    _QuestionPrompt(
-      title: 'Physical activity level',
-      subtitle: 'How would you describe your current base level?',
-      options: [
-        'Beginner',
-        'Intermediate',
-        'Advanced',
-        'Returning after break'
-      ],
-    ),
-  ];
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
 
   void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final questionnaire = Questionnaire(
+      primaryGoal: _controllers['primaryGoal']!.text.trim(),
+      timeCommitment: _controllers['timeCommitment']!.text.trim(),
+      healthIssues: _controllers['healthIssues']!.text.trim(),
+      medications: _controllers['medications']!.text.trim(),
+      weeklySessions: _controllers['weeklySessions']!.text.trim(),
+      outsideActivity: _controllers['outsideActivity']!.text.trim(),
+    );
+
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SubscriptionScreen(
+      MaterialPageRoute(
+        builder: (_) => SubscriptionConfirmScreen(
           mentor: widget.mentor,
-          questionnaireAnswers: {
-            'primaryGoal': _answers[0]!,
-            'timeCommitment': _answers[1]!,
-            'healthIssues': _answers[2]!,
-            'medications': _answers[3]!,
-            'weeklyAvailability': _answers[4]!,
-            'physicalActivityLevel': _answers[5]!,
-          },
+          questionnaire: questionnaire,
         ),
       ),
     );
@@ -85,122 +85,64 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mentor = widget.mentor;
-    final progress = _answers.length / _questions.length;
+    final priceLabel = widget.mentor.currency.toUpperCase() == 'USD'
+        ? '${widget.mentor.monthlyPrice.toStringAsFixed(2)}\$'
+        : '${widget.mentor.monthlyPrice.toStringAsFixed(2)} ${widget.mentor.currency}';
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Client questionnaire')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        children: [
-          AppPanel(
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.secondaryColor.withValues(alpha: 0.22),
-                AppTheme.surfaceColor,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  mentor == null
-                      ? 'Plan fit questionnaire'
-                      : 'Questionnaire for ${mentor.name}',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Answer all six prompts so the subscription flow can create a real onboarding request.',
-                ),
-                const SizedBox(height: 16),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 10,
-                    backgroundColor: Colors.white.withValues(alpha: 0.08),
-                    color: AppTheme.secondaryColor,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '${_answers.length}/${_questions.length} answered',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppTheme.textMutedColor,
-                      ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          ..._questions.asMap().entries.map((entry) {
-            final index = entry.key;
-            final question = entry.value;
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: AppPanel(
-                color: AppTheme.surfaceColor,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${index + 1}. ${question.title}',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      question.subtitle,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: AppTheme.textMutedColor,
-                          ),
-                    ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: question.options.map((option) {
-                        return ChoiceChip(
-                          label: Text(option),
-                          selected: _answers[index] == option,
-                          onSelected: (_) {
-                            setState(() {
-                              _answers[index] = option;
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                  ],
+    return AppModalPage(
+      body: Form(
+        key: _formKey,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        child: ListView(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              decoration: BoxDecoration(
+                color: AppTheme.accent,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Text(
+                'KUPI PLAN',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.onAccent,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 24,
                 ),
               ),
-            );
-          }),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _answers.length == _questions.length ? _submit : null,
-              child: const Text('Continue to subscription'),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            const Text(
+              'Vaši odgovori na sljedeća pitanja pomažu mentoru da napravi što bolji personalizovani plan za vas.',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 18),
+            for (final question in _questions) ...[
+              Text(question.label,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _controllers[question.key],
+                minLines: 1,
+                maxLines: 4,
+                maxLength: 500,
+                decoration: const InputDecoration(hintText: 'Vaš odgovor...'),
+                validator: (value) => Validators.textLength(
+                  value,
+                  min: 2,
+                  max: 500,
+                  label: 'Odgovor',
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            const SizedBox(height: 10),
+            PrimaryButton(
+                label: 'PRETPLATI SE $priceLabel', onPressed: _submit),
+            const SizedBox(height: 12),
+          ],
+        ),
       ),
     );
   }
-}
-
-class _QuestionPrompt {
-  const _QuestionPrompt({
-    required this.title,
-    required this.subtitle,
-    required this.options,
-  });
-
-  final String title;
-  final String subtitle;
-  final List<String> options;
 }

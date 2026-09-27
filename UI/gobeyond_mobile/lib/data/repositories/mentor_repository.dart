@@ -1,78 +1,93 @@
 import '../../core/network/dio_client.dart';
-import '../models/mentor_model.dart';
+import '../models/mentor_summary.dart';
+import '../models/recommendation.dart';
+import '../models/review.dart';
 
-class MentorRepository {
-  MentorRepository(this._client);
+abstract class MentorRepository {
+  Future<List<MentorSummary>> getMentors({
+    int? trainingTypeId,
+    String? search,
+    String sortBy = 'rating',
+    String sortDirection = 'desc',
+  });
+
+  Future<MentorDetail> getMentorById(int mentorProfileId);
+
+  Future<List<Review>> getMentorReviews(int mentorProfileId);
+
+  Future<List<MentorSummary>> getSimilarMentors(int mentorProfileId,
+      {int take = 3});
+
+  Future<List<MentorRecommendation>> getRecommendedMentors({int take = 5});
+}
+
+class ApiMentorRepository implements MentorRepository {
+  ApiMentorRepository({DioClient? client}) : _client = client ?? DioClient();
 
   final DioClient _client;
 
-  Future<List<MentorModel>> getMentors({
+  @override
+  Future<List<MentorSummary>> getMentors({
+    int? trainingTypeId,
     String? search,
-    String? category,
-    double? minRating,
-    double? maxPrice,
-    String? sort,
+    String sortBy = 'rating',
+    String sortDirection = 'desc',
   }) async {
     final response = await _client.dio.get<List<dynamic>>(
       '/api/mentors',
       queryParameters: {
+        if (trainingTypeId != null) 'trainingTypeId': trainingTypeId,
         if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
-        if (category != null && category.trim().isNotEmpty && category != 'All')
-          'category': category.trim(),
-        if (minRating != null) 'minRating': minRating,
-        if (maxPrice != null) 'maxPrice': maxPrice,
-        if (sort != null) 'sort': sort,
+        'sortBy': sortBy,
+        'sortDirection': sortDirection,
       },
     );
-
     return (response.data ?? const [])
         .whereType<Map<String, dynamic>>()
-        .map(MentorModel.fromJson)
+        .map(MentorSummary.fromJson)
         .toList();
   }
 
-  Future<List<String>> getTrainingTypes() async {
-    final response =
-        await _client.dio.get<List<dynamic>>('/api/training-types');
+  @override
+  Future<MentorDetail> getMentorById(int mentorProfileId) async {
+    final response = await _client.dio
+        .get<Map<String, dynamic>>('/api/mentors/$mentorProfileId');
+    return MentorDetail.fromJson(response.data ?? const {});
+  }
+
+  @override
+  Future<List<Review>> getMentorReviews(int mentorProfileId) async {
+    final response = await _client.dio
+        .get<List<dynamic>>('/api/mentors/$mentorProfileId/reviews');
     return (response.data ?? const [])
         .whereType<Map<String, dynamic>>()
-        .map((item) => item['name']?.toString() ?? '')
-        .where((name) => name.isNotEmpty)
+        .map(Review.fromJson)
         .toList();
   }
 
-  Future<void> saveReview(int mentorId, int rating, String comment) async {
-    await _client.dio.post<void>('/api/reviews', data: {
-      'mentorId': mentorId,
-      'rating': rating,
-      'comment': comment,
-    });
-  }
-
-  Future<MentorModel> getMentorById(int mentorId) async {
-    final response =
-        await _client.dio.get<Map<String, dynamic>>('/api/mentors/$mentorId');
-    if (response.data == null) {
-      throw Exception('Empty mentor response.');
-    }
-    return MentorModel.fromJson(response.data!);
-  }
-
-  Future<List<Map<String, dynamic>>> getMentorReviews(int mentorId) async {
-    final response =
-        await _client.dio.get<List<dynamic>>('/api/reviews/mentor/$mentorId');
+  @override
+  Future<List<MentorSummary>> getSimilarMentors(int mentorProfileId,
+      {int take = 3}) async {
+    final response = await _client.dio.get<List<dynamic>>(
+      '/api/mentors/$mentorProfileId/similar',
+      queryParameters: {'take': take},
+    );
     return (response.data ?? const [])
         .whereType<Map<String, dynamic>>()
-        .map((item) => Map<String, dynamic>.from(item))
+        .map(MentorSummary.fromJson)
         .toList();
   }
 
-  Future<List<MentorModel>> getRecommendedMentors() async {
-    final response =
-        await _client.dio.get<List<dynamic>>('/api/mentors/recommended');
+  @override
+  Future<List<MentorRecommendation>> getRecommendedMentors(
+      {int take = 5}) async {
+    final response = await _client.dio.get<List<dynamic>>(
+      '/api/recommendations/mentors',
+      queryParameters: {'take': take},
+    );
     return (response.data ?? const [])
         .whereType<Map<String, dynamic>>()
-        .map(MentorModel.fromJson)
+        .map(MentorRecommendation.fromJson)
         .toList();
   }
 }

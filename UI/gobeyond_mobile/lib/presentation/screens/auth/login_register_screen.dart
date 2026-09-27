@@ -1,319 +1,75 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/auth/auth_scope.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
+import '../../../data/repositories/lookup_repository.dart';
 import '../../widgets/app_panel.dart';
-import '../common/client_shell_screen.dart';
+import '../../widgets/gobeyond_logo.dart';
+import '../../widgets/primary_button.dart';
+import '../home/home_screen.dart';
+import 'registration_form.dart';
 
+/// Login/registration for the Client role only (this app is client-only per
+/// the project scope). Matches the dark/yellow theme; there is no dedicated
+/// mockup for this screen (course rules exempt login/registration/profile
+/// from requiring mockups).
 class LoginRegisterScreen extends StatefulWidget {
-  const LoginRegisterScreen({super.key});
+  const LoginRegisterScreen({super.key, this.lookupRepository});
+
+  final LookupRepository? lookupRepository;
 
   @override
   State<LoginRegisterScreen> createState() => _LoginRegisterScreenState();
 }
 
-class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  bool _isLogin = true;
-  late final TextEditingController _nameController;
-  late final TextEditingController _emailController;
-  late final TextEditingController _passwordController;
-  late final TextEditingController _ageController;
-  late final TextEditingController _heightController;
-  late final TextEditingController _weightController;
-  late final TextEditingController _fitnessLevelController;
-  String? _sex;
-  String? _trainingExperience;
-
-  @override
-  void initState() {
-    super.initState();
-    _nameController = TextEditingController();
-    _emailController = TextEditingController();
-    _passwordController = TextEditingController();
-    _ageController = TextEditingController();
-    _heightController = TextEditingController();
-    _weightController = TextEditingController();
-    _fitnessLevelController = TextEditingController();
-  }
+class _LoginRegisterScreenState extends State<LoginRegisterScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController =
+      TabController(length: 2, vsync: this);
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _ageController.dispose();
-    _heightController.dispose();
-    _weightController.dispose();
-    _fitnessLevelController.dispose();
+    _tabController.dispose();
     super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    final auth = AuthScope.read(context);
-    final success = _isLogin
-        ? await auth.login(
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-          )
-        : await auth.registerClient(_buildRegistrationPayload());
-
-    if (!success || !mounted) {
-      return;
-    }
-
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => const ClientShellScreen(),
-      ),
-    );
-  }
-
-  Map<String, dynamic> _buildRegistrationPayload() {
-    final parts = _nameController.text.trim().split(RegExp(r'\s+'));
-    final firstName = parts.isEmpty ? 'Client' : parts.first;
-    final lastName = parts.length > 1 ? parts.sublist(1).join(' ') : 'User';
-
-    return {
-      'firstName': firstName,
-      'lastName': lastName,
-      'email': _emailController.text.trim(),
-      'password': _passwordController.text,
-      'weight': double.parse(_weightController.text.trim()),
-      'height': double.parse(_heightController.text.trim()),
-      'age': int.parse(_ageController.text.trim()),
-      'fitnessLevel': _fitnessLevelController.text.trim(),
-      'sex': _sex,
-      'trainingExperience': _trainingExperience,
-    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = AuthScope.of(context);
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Login / Register')),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: Column(
           children: [
-            AppPanel(
-              gradient: LinearGradient(
-                colors: [
-                  AppTheme.accentColor.withValues(alpha: 0.24),
-                  AppTheme.surfaceColor,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _isLogin ? 'Welcome back' : 'Create client account',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    _isLogin
-                        ? 'Use the seeded client credentials or your registered account.'
-                        : 'Registration writes a real client profile to the GoBeyond API.',
-                  ),
-                ],
-              ),
+            const SizedBox(height: 24),
+            const GoBeyondLogo(fontSize: 40),
+            const SizedBox(height: 8),
+            const Text(
+              'Poveži se sa svojim mentorom',
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
             ),
-            const SizedBox(height: 18),
-            AppPanel(
-              color: AppTheme.surfaceColor,
-              padding: const EdgeInsets.all(8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _ModeButton(
-                      label: 'Login',
-                      selected: _isLogin,
-                      onTap: () => setState(() => _isLogin = true),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _ModeButton(
-                      label: 'Register',
-                      selected: !_isLogin,
-                      onTap: () => setState(() => _isLogin = false),
-                    ),
-                  ),
-                ],
-              ),
+            const SizedBox(height: 20),
+            TabBar(
+              controller: _tabController,
+              indicatorColor: AppTheme.accent,
+              labelColor: AppTheme.accent,
+              unselectedLabelColor: AppTheme.textMuted,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w800),
+              tabs: const [
+                Tab(text: 'PRIJAVA'),
+                Tab(text: 'REGISTRACIJA'),
+              ],
             ),
-            const SizedBox(height: 18),
-            if (!_isLogin) ...[
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Full name'),
-                validator: (value) {
-                  if (_isLogin) {
-                    return null;
-                  }
-
-                  if ((value ?? '').trim().split(RegExp(r'\s+')).length < 2) {
-                    return 'Unesite ime i prezime.';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-            ],
-            TextFormField(
-              controller: _emailController,
-              decoration: const InputDecoration(labelText: 'Email'),
-              keyboardType: TextInputType.emailAddress,
-              validator: (value) {
-                final email = value?.trim() ?? '';
-                if (email.isEmpty ||
-                    !email.contains('@') ||
-                    !email.contains('.')) {
-                  return 'Enter a valid email format.';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _passwordController,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
-              validator: (value) {
-                if ((value ?? '').length < (_isLogin ? 1 : 8)) {
-                  return _isLogin
-                      ? 'Unesite lozinku.'
-                      : 'Koristite najmanje 8 znakova.';
-                }
-                return null;
-              },
-            ),
-            if (!_isLogin) ...[
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _sex,
-                decoration: const InputDecoration(labelText: 'Spol'),
-                items: const ['Male', 'Female', 'Other']
-                    .map((value) =>
-                        DropdownMenuItem(value: value, child: Text(value)))
-                    .toList(),
-                onChanged: (value) => setState(() => _sex = value),
-                validator: (value) => value == null ? 'Odaberite spol.' : null,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _trainingExperience,
-                decoration:
-                    const InputDecoration(labelText: 'Prethodno iskustvo'),
-                items: const ['Beginner', 'Intermediate', 'Advanced']
-                    .map((value) =>
-                        DropdownMenuItem(value: value, child: Text(value)))
-                    .toList(),
-                onChanged: (value) =>
-                    setState(() => _trainingExperience = value),
-                validator: (value) =>
-                    value == null ? 'Odaberite iskustvo.' : null,
-              ),
-              const SizedBox(height: 12),
-              Row(
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
                 children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _ageController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Age'),
-                      validator: (value) {
-                        final parsed = int.tryParse(value ?? '');
-                        if (parsed == null || parsed < 16 || parsed > 90) {
-                          return 'Use 16-90.';
-                        }
-                        return null;
-                      },
-                    ),
+                  _LoginForm(
+                    onSwitchToRegister: () => _tabController.animateTo(1),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _fitnessLevelController,
-                      decoration:
-                          const InputDecoration(labelText: 'Fitness level'),
-                      validator: (value) {
-                        if ((value ?? '').trim().length < 3) {
-                          return 'Use at least 3 characters.';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
+                  RegistrationForm(lookupRepository: widget.lookupRepository),
                 ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _heightController,
-                      keyboardType: TextInputType.number,
-                      decoration:
-                          const InputDecoration(labelText: 'Height (cm)'),
-                      validator: (value) {
-                        final parsed = double.tryParse(value ?? '');
-                        if (parsed == null || parsed < 120 || parsed > 240) {
-                          return 'Use 120-240 cm.';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _weightController,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration:
-                          const InputDecoration(labelText: 'Weight (kg)'),
-                      validator: (value) {
-                        final parsed = double.tryParse(value ?? '');
-                        if (parsed == null || parsed < 35 || parsed > 250) {
-                          return 'Use 35-250 kg.';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            if (auth.errorMessage != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                auth.errorMessage!,
-                style: const TextStyle(color: Colors.redAccent),
-              ),
-            ],
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: auth.isBusy ? null : _submit,
-                child: auth.isBusy
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(_isLogin ? 'Login' : 'Create account'),
               ),
             ),
           ],
@@ -323,34 +79,116 @@ class _LoginRegisterScreenState extends State<LoginRegisterScreen> {
   }
 }
 
-class _ModeButton extends StatelessWidget {
-  const _ModeButton({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
+class _LoginForm extends StatefulWidget {
+  const _LoginForm({required this.onSwitchToRegister});
 
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback onSwitchToRegister;
+
+  @override
+  State<_LoginForm> createState() => _LoginFormState();
+}
+
+class _LoginFormState extends State<_LoginForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscure = true;
+  bool _submitting = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _submitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await AuthScope.of(context).login(
+        usernameOrEmail: _usernameController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
+    } catch (error) {
+      final apiError = ApiException.from(error);
+      if (mounted) setState(() => _errorMessage = apiError.message);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: selected ? AppTheme.accentColor : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: selected ? const Color(0xFF16100B) : Colors.white,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Form(
+        key: _formKey,
+        child: AppPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Prijava',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _usernameController,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Korisničko ime ili email',
                 ),
+                validator: (value) => Validators.required(value,
+                    label: 'Korisničko ime ili email'),
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _passwordController,
+                obscureText: _obscure,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _submit(),
+                decoration: InputDecoration(
+                  labelText: 'Lozinka',
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+                validator: (value) =>
+                    Validators.required(value, label: 'Lozinka'),
+              ),
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: AppTheme.danger, fontSize: 13),
+                ),
+              ],
+              const SizedBox(height: 20),
+              PrimaryButton(
+                label: 'PRIJAVI SE',
+                isLoading: _submitting,
+                onPressed: _submit,
+              ),
+              const SizedBox(height: 14),
+              TextButton(
+                onPressed: widget.onSwitchToRegister,
+                child: const Text('Nemate nalog? Registrujte se'),
+              ),
+            ],
           ),
         ),
       ),

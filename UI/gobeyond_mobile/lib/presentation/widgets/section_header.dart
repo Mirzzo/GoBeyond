@@ -6,20 +6,18 @@ class SectionHeader extends StatelessWidget {
   const SectionHeader({
     super.key,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     this.actionLabel,
     this.onAction,
   });
 
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final String? actionLabel;
   final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -27,22 +25,27 @@ class SectionHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: textTheme.titleLarge),
-              const SizedBox(height: 4),
               Text(
-                subtitle,
-                style: textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.textMutedColor,
+                title,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
                 ),
               ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle!,
+                  style:
+                      const TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                ),
+              ],
             ],
           ),
         ),
         if (actionLabel != null && onAction != null)
-          TextButton(
-            onPressed: onAction,
-            child: Text(actionLabel!),
-          ),
+          TextButton(onPressed: onAction, child: Text(actionLabel!)),
       ],
     );
   }

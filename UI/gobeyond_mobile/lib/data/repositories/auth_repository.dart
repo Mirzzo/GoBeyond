@@ -1,55 +1,64 @@
 import '../../core/network/dio_client.dart';
 
-class AuthRepository {
-  AuthRepository(this._client);
+/// Abstract so screens can be unit-tested against a fake without touching
+/// the network (see test/registration_validation_test.dart).
+abstract class AuthRepository {
+  Future<Map<String, dynamic>> login(String usernameOrEmail, String password);
+
+  Future<Map<String, dynamic>> registerClient(Map<String, dynamic> payload);
+
+  Future<void> logout(String refreshToken);
+
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+    required String confirmPassword,
+  });
+}
+
+class ApiAuthRepository implements AuthRepository {
+  ApiAuthRepository({DioClient? client}) : _client = client ?? DioClient();
 
   final DioClient _client;
 
-  Future<Map<String, dynamic>> login(String email, String password) async {
+  @override
+  Future<Map<String, dynamic>> login(
+      String usernameOrEmail, String password) async {
     final response = await _client.dio.post<Map<String, dynamic>>(
       '/api/auth/login',
-      data: {'email': email, 'password': password},
+      data: {'username': usernameOrEmail, 'password': password},
     );
-    return _asMap(response.data);
+    return response.data ?? const {};
   }
 
+  @override
   Future<Map<String, dynamic>> registerClient(
       Map<String, dynamic> payload) async {
     final response = await _client.dio.post<Map<String, dynamic>>(
       '/api/auth/register/client',
       data: payload,
     );
-    return _asMap(response.data);
+    return response.data ?? const {};
   }
 
-  Future<Map<String, dynamic>> getMyProfile() async {
-    final response =
-        await _client.dio.get<Map<String, dynamic>>('/api/user-profile/me');
-    return _asMap(response.data);
-  }
-
-  Future<Map<String, dynamic>> updateMyProfile(
-      Map<String, dynamic> payload) async {
-    final response = await _client.dio.put<Map<String, dynamic>>(
-      '/api/user-profile/me',
-      data: payload,
+  @override
+  Future<void> logout(String refreshToken) async {
+    await _client.dio.post<void>(
+      '/api/auth/logout',
+      data: {'refreshToken': refreshToken},
     );
-    return _asMap(response.data);
   }
 
-  Future<void> changePassword(
-      String currentPassword, String newPassword) async {
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
     await _client.dio.post<void>('/api/auth/change-password', data: {
       'currentPassword': currentPassword,
       'newPassword': newPassword,
+      'confirmPassword': confirmPassword,
     });
-  }
-
-  Map<String, dynamic> _asMap(Map<String, dynamic>? value) {
-    if (value == null) {
-      throw Exception('Empty response from server.');
-    }
-
-    return value;
   }
 }

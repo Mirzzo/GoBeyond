@@ -1,344 +1,244 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../data/models/subscription_model.dart';
-import '../../../data/models/training_plan_model.dart';
-import '../../../data/repositories/subscription_repository.dart';
-import '../../../data/repositories/training_plan_repository.dart';
-import '../../../core/network/dio_client.dart';
+import '../../../data/models/lookup_item.dart';
+import '../../../data/models/recommendation.dart';
+import '../../../data/repositories/lookup_repository.dart';
+import '../../../data/repositories/mentor_repository.dart';
 import '../../widgets/app_panel.dart';
-import '../../widgets/category_card.dart';
+import '../../widgets/gb_scaffold.dart';
+import '../../widgets/gobeyond_logo.dart';
+import '../../widgets/primary_button.dart';
 import '../../widgets/section_header.dart';
-import '../subscription/subscription_screen.dart';
+import '../../widgets/star_rating.dart';
+import '../mentor/mentor_detail_screen.dart';
+import '../mentor/mentor_list_screen.dart';
 
+IconData trainingTypeIcon(String name) {
+  final normalized = name.toLowerCase();
+  if (normalized.contains('weight') || normalized.contains('teg')) {
+    return Icons.fitness_center_rounded;
+  }
+  if (normalized.contains('calisthenic')) {
+    return Icons.accessibility_new_rounded;
+  }
+  if (normalized.contains('hybrid')) {
+    return Icons.bolt_rounded;
+  }
+  return Icons.sports_gymnastics_rounded;
+}
+
+/// Mockup 07: the GOBEYOND panel with one big yellow button per training
+/// type, and the "PREPOROUČENO ZA VAS" recommendation feed underneath.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.onNavigate});
+  const HomeScreen({super.key, this.lookupRepository, this.mentorRepository});
 
-  final ValueChanged<int> onNavigate;
+  final LookupRepository? lookupRepository;
+  final MentorRepository? mentorRepository;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final TrainingPlanRepository _planRepository =
-      TrainingPlanRepository(DioClient());
-  final SubscriptionRepository _subscriptionRepository =
-      SubscriptionRepository(DioClient());
+  late final LookupRepository _lookupRepository =
+      widget.lookupRepository ?? ApiLookupRepository();
+  late final MentorRepository _mentorRepository =
+      widget.mentorRepository ?? ApiMentorRepository();
 
-  TrainingPlanModel? _plan;
-  SubscriptionModel? _subscription;
-  bool _isLoading = true;
-  String? _errorMessage;
-
-  static const _categories = [
-    (
-      'Strength Plans',
-      'Weekly structure, deloads and mentor feedback.',
-      Icons.fitness_center_rounded,
-      0xFFF2A541
-    ),
-    (
-      'Habit Reset',
-      'Nutrition, sleep rhythm and realistic adherence.',
-      Icons.track_changes_rounded,
-      0xFF5DD6C0
-    ),
-    (
-      'Progress Reviews',
-      'Monthly metrics, notes and plan changes.',
-      Icons.insights_rounded,
-      0xFF8FA8FF
-    ),
-  ];
+  late Future<_HomeData> _future;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _future = _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final subscriptions = await _subscriptionRepository.getMySubscriptions();
-      final activeSubscription = subscriptions
-          .cast<SubscriptionModel?>()
-          .firstWhere(
-            (item) => item?.status == 'Active',
-            orElse: () => subscriptions.isEmpty ? null : subscriptions.first,
-          );
-
-      TrainingPlanModel? currentPlan;
-      try {
-        currentPlan = await _planRepository.getCurrentPlan();
-      } catch (_) {
-        currentPlan = null;
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _subscription = activeSubscription;
-        _plan = currentPlan;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+  Future<_HomeData> _load() async {
+    final results = await Future.wait([
+      _lookupRepository.getTrainingTypes(),
+      _mentorRepository.getRecommendedMentors(take: 5),
+    ]);
+    return _HomeData(
+      trainingTypes: results[0] as List<LookupItem>,
+      recommendations: results[1] as List<MentorRecommendation>,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final plan = _plan;
-    final subscription = _subscription;
+    return GbScaffold(
+      body: FutureBuilder<_HomeData>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            final message = ApiException.from(snapshot.error!).message;
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded,
+                        color: AppTheme.danger, size: 40),
+                    const SizedBox(height: 12),
+                    Text(message, textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: 180,
+                      child: PrimaryButton(
+                        label: 'Pokušaj ponovo',
+                        onPressed: () => setState(() {
+                          _future = _load();
+                        }),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
 
-    return SafeArea(
-      child: RefreshIndicator(
-        onRefresh: _load,
-        child: CustomScrollView(
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  Text('GoBeyond', style: theme.textTheme.displaySmall),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Your client dashboard for coaching, structure and recovery-aware progress.',
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: AppTheme.textMutedColor,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  if (_isLoading)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(32),
-                        child: CircularProgressIndicator(),
-                      ),
-                    )
-                  else if (_errorMessage != null)
-                    AppPanel(
-                      color: AppTheme.surfaceColor,
-                      child: Text(
-                        _errorMessage!,
-                        style: theme.textTheme.bodyLarge
-                            ?.copyWith(color: Colors.redAccent),
-                      ),
-                    )
-                  else ...[
-                    AppPanel(
-                      gradient: LinearGradient(
-                        colors: [
-                          AppTheme.accentColor.withValues(alpha: 0.30),
-                          const Color(0xFF1B2429),
-                          AppTheme.secondaryColor.withValues(alpha: 0.18),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            plan == null
-                                ? 'No active plan yet.'
-                                : 'Week ${plan.weekNumber} is underway.',
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              color: const Color(0xFFFFE8C7),
+          final data = snapshot.data!;
+          return RefreshIndicator(
+            onRefresh: () async {
+              final next = _load();
+              setState(() {
+                _future = next;
+              });
+              await next;
+            },
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                AppPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Center(child: GoBeyondLogo()),
+                      const SizedBox(height: 20),
+                      if (data.trainingTypes.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'Trenutno nema dostupnih vrsta treninga.',
+                            style: TextStyle(color: AppTheme.textMuted),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      else
+                        for (final type in data.trainingTypes) ...[
+                          PrimaryButton(
+                            label: type.name.toUpperCase(),
+                            icon: Icon(trainingTypeIcon(type.name),
+                                color: AppTheme.onAccent),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => MentorListScreen(
+                                  trainingTypeId: type.id,
+                                  trainingTypeName: type.name,
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            plan?.focusTitle ??
-                                'Choose a mentor and complete onboarding.',
-                            style: theme.textTheme.headlineMedium,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            plan?.focusSummary ??
-                                'Browse mentors, answer the questionnaire and confirm your subscription to receive a plan.',
-                          ),
-                          const SizedBox(height: 18),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(999),
-                            child: LinearProgressIndicator(
-                              value: plan?.completionRate ?? 0,
-                              minHeight: 10,
-                              backgroundColor:
-                                  Colors.white.withValues(alpha: 0.08),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            plan == null
-                                ? 'No sessions ready'
-                                : '${plan.completedSessions}/${plan.totalSessions} sessions completed',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: AppTheme.textMutedColor,
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () =>
-                                      widget.onNavigate(plan == null ? 1 : 2),
-                                  child: Text(plan == null
-                                      ? 'Explore mentors'
-                                      : 'Open my plan'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () => widget.onNavigate(1),
-                                  child: const Text('Browse mentors'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    const SectionHeader(
-                      title: 'Services',
-                      subtitle:
-                          'Core client features required by the mobile flow.',
-                    ),
-                    const SizedBox(height: 12),
-                    ..._categories.map(
-                      (category) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: CategoryCard(
-                          title: category.$1,
-                          subtitle: category.$2,
-                          icon: category.$3,
-                          accentColorValue: category.$4,
-                          onTap: () => widget.onNavigate(1),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const SectionHeader(
-                      title: 'Active subscription',
-                      subtitle: 'Status, mentor assignment and renewal timing.',
-                    ),
-                    const SizedBox(height: 12),
-                    AppPanel(
-                      color: AppTheme.surfaceColor,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.secondaryColor
-                                      .withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Text(
-                                  subscription?.status ?? 'Inactive',
-                                  style: theme.textTheme.labelLarge?.copyWith(
-                                    color: AppTheme.secondaryColor,
-                                  ),
-                                ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                subscription?.paymentStatus ?? 'No payment yet',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: AppTheme.textMutedColor,
-                                ),
-                              ),
-                            ],
                           ),
                           const SizedBox(height: 16),
-                          Text(
-                            subscription?.planName ??
-                                'No subscription selected',
-                            style: theme.textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Mentor: ${subscription?.mentorName ?? 'Choose a mentor'}',
-                            style: theme.textTheme.bodyLarge,
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            subscription == null
-                                ? 'Start a subscription to receive a training plan.'
-                                : '${subscription.progressLabel} | ${subscription.checkInDay} | ${subscription.renewalLabel}',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: AppTheme.textMutedColor,
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => const SubscriptionScreen(),
-                                  ),
-                                );
-                              },
-                              child: const Text('Open subscription'),
-                            ),
-                          ),
                         ],
-                      ),
-                    ),
-                    if (plan != null) ...[
-                      const SizedBox(height: 24),
-                      AppPanel(
-                        color: AppTheme.surfaceColor,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Coach note',
-                                style: theme.textTheme.titleMedium),
-                            const SizedBox(height: 10),
-                            Text('"${plan.motivationalQuote}"',
-                                style: theme.textTheme.bodyLarge),
-                            const SizedBox(height: 14),
-                            TextButton(
-                              onPressed: () => widget.onNavigate(3),
-                              child: const Text('Open progress history'),
-                            ),
-                          ],
-                        ),
-                      ),
                     ],
-                  ],
-                ]),
-              ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                const SectionHeader(
+                  title: 'PREPORUČENO ZA VAS',
+                  subtitle: 'Mentori odabrani prema vašem profilu i ciljevima',
+                ),
+                const SizedBox(height: 14),
+                if (data.recommendations.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Text(
+                      'Popunite svoj profil kako bismo vam mogli preporučiti mentore.',
+                      style: TextStyle(color: AppTheme.textMuted),
+                    ),
+                  )
+                else
+                  for (final recommendation in data.recommendations)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child:
+                          _RecommendationCard(recommendation: recommendation),
+                    ),
+              ],
             ),
-          ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _HomeData {
+  const _HomeData({required this.trainingTypes, required this.recommendations});
+
+  final List<LookupItem> trainingTypes;
+  final List<MentorRecommendation> recommendations;
+}
+
+class _RecommendationCard extends StatelessWidget {
+  const _RecommendationCard({required this.recommendation});
+
+  final MentorRecommendation recommendation;
+
+  @override
+  Widget build(BuildContext context) {
+    final mentor = recommendation.mentor;
+    return AppPanel(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) =>
+              MentorDetailScreen(mentorProfileId: mentor.mentorProfileId),
         ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 28,
+            backgroundColor: AppTheme.panelLight,
+            child: Text(
+              mentor.fullName.isNotEmpty
+                  ? mentor.fullName[0].toUpperCase()
+                  : '?',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(mentor.fullName,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 16)),
+                const SizedBox(height: 4),
+                StarRating(rating: mentor.averageRating, size: 16),
+                const SizedBox(height: 6),
+                for (final reason in recommendation.reasons.take(2))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      '• $reason',
+                      style: const TextStyle(
+                          color: AppTheme.textMuted, fontSize: 12.5),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,73 +1,64 @@
 import '../../core/network/dio_client.dart';
-import '../models/subscription_model.dart';
+import '../models/questionnaire.dart';
+import '../models/subscription.dart';
 
-class SubscriptionRepository {
-  SubscriptionRepository(this._client);
+abstract class SubscriptionRepository {
+  Future<Subscription> createSubscription({
+    required int mentorProfileId,
+    required Questionnaire questionnaire,
+  });
+
+  Future<List<Subscription>> getMySubscriptions({String? status});
+
+  Future<Subscription> getSubscriptionDetail(int id);
+
+  Future<Subscription> cancelSubscription(int id);
+}
+
+class ApiSubscriptionRepository implements SubscriptionRepository {
+  ApiSubscriptionRepository({DioClient? client})
+      : _client = client ?? DioClient();
 
   final DioClient _client;
 
-  Future<List<SubscriptionModel>> getMySubscriptions({String? search}) async {
-    final response = await _client.dio.get<List<dynamic>>(
-      '/api/subscriptions/my',
-      queryParameters: {
-        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+  @override
+  Future<Subscription> createSubscription({
+    required int mentorProfileId,
+    required Questionnaire questionnaire,
+  }) async {
+    final response = await _client.dio.post<Map<String, dynamic>>(
+      '/api/subscriptions',
+      data: {
+        'mentorProfileId': mentorProfileId,
+        'questionnaire': questionnaire.toJson(),
       },
     );
+    return Subscription.fromJson(response.data ?? const {});
+  }
 
+  @override
+  Future<List<Subscription>> getMySubscriptions({String? status}) async {
+    final response = await _client.dio.get<List<dynamic>>(
+      '/api/subscriptions/my',
+      queryParameters: {if (status != null) 'status': status},
+    );
     return (response.data ?? const [])
         .whereType<Map<String, dynamic>>()
-        .map(SubscriptionModel.fromJson)
+        .map(Subscription.fromJson)
         .toList();
   }
 
-  Future<SubscriptionModel> createSubscription(
-      Map<String, dynamic> payload) async {
-    final response = await _client.dio.post<Map<String, dynamic>>(
-      '/api/subscriptions',
-      data: payload,
-    );
-
-    final subscription =
-        response.data?['subscription'] as Map<String, dynamic>?;
-    if (subscription == null) {
-      throw Exception('Empty subscription response.');
-    }
-
-    return SubscriptionModel.fromJson(subscription);
+  @override
+  Future<Subscription> getSubscriptionDetail(int id) async {
+    final response = await _client.dio
+        .get<Map<String, dynamic>>('/api/subscriptions/my/$id');
+    return Subscription.fromJson(response.data ?? const {});
   }
 
-  Future<Map<String, dynamic>> getPaymentConfig() async {
-    final response =
-        await _client.dio.get<Map<String, dynamic>>('/api/payments/config');
-    return response.data ?? const {};
-  }
-
-  Future<Map<String, dynamic>> createPaymentIntent(int subscriptionId) async {
-    final response = await _client.dio.post<Map<String, dynamic>>(
-      '/api/payments/create-intent',
-      data: {'subscriptionId': subscriptionId},
-    );
-    return response.data ??
-        (throw StateError('Server nije vratio podatke za plaćanje.'));
-  }
-
-  Future<void> confirmDemoPayment(int paymentId) async {
-    await _client.dio.post<void>('/api/payments/$paymentId/confirm-demo');
-  }
-
-  Future<void> refreshPayment(int paymentId) async {
-    await _client.dio.post<void>('/api/payments/$paymentId/refresh');
-  }
-
-  Future<SubscriptionModel> cancelSubscription(int subscriptionId) async {
-    final response = await _client.dio.post<Map<String, dynamic>>(
-      '/api/subscriptions/$subscriptionId/cancel',
-    );
-
-    if (response.data == null) {
-      throw Exception('Empty cancellation response.');
-    }
-
-    return SubscriptionModel.fromJson(response.data!);
+  @override
+  Future<Subscription> cancelSubscription(int id) async {
+    final response = await _client.dio
+        .post<Map<String, dynamic>>('/api/subscriptions/$id/cancel');
+    return Subscription.fromJson(response.data ?? const {});
   }
 }

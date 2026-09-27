@@ -1,329 +1,282 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/network/dio_client.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../data/models/mentor_model.dart';
+import '../../../core/utils/formatters.dart';
+import '../../../data/models/mentor_summary.dart';
+import '../../../data/models/review.dart';
+import '../../../data/models/subscription.dart';
 import '../../../data/repositories/mentor_repository.dart';
+import '../../../data/repositories/subscription_repository.dart';
+import '../../widgets/app_network_image.dart';
 import '../../widgets/app_panel.dart';
-import '../../widgets/section_header.dart';
-import '../subscription/subscription_screen.dart';
+import '../../widgets/app_modal_page.dart';
+import '../../widgets/primary_button.dart';
+import '../../widgets/star_rating.dart';
+import '../../widgets/state_views.dart';
 import 'questionnaire_screen.dart';
 
-class MentorDetailScreen extends StatefulWidget {
-  const MentorDetailScreen({super.key, required this.mentor});
+const _blockingStatuses = {'PendingPayment', 'AwaitingMentor', 'Active'};
 
-  final MentorModel mentor;
+/// Mockup 10: full-screen mentor detail modal with the KUPI PLAN call to
+/// action.
+class MentorDetailScreen extends StatefulWidget {
+  const MentorDetailScreen({
+    super.key,
+    required this.mentorProfileId,
+    this.mentorRepository,
+    this.subscriptionRepository,
+  });
+
+  final int mentorProfileId;
+  final MentorRepository? mentorRepository;
+  final SubscriptionRepository? subscriptionRepository;
 
   @override
   State<MentorDetailScreen> createState() => _MentorDetailScreenState();
 }
 
 class _MentorDetailScreenState extends State<MentorDetailScreen> {
-  final MentorRepository _repository = MentorRepository(DioClient());
-  List<Map<String, dynamic>> _reviews = const [];
-  bool _isLoadingReviews = true;
+  late final MentorRepository _mentorRepository =
+      widget.mentorRepository ?? ApiMentorRepository();
+  late final SubscriptionRepository _subscriptionRepository =
+      widget.subscriptionRepository ?? ApiSubscriptionRepository();
 
-  Future<void> _writeReview() async {
-    final formKey = GlobalKey<FormState>();
-    final comment = TextEditingController();
-    int rating = 5;
-    final submitted = await showDialog<bool>(
-            context: context,
-            builder: (dialogContext) => StatefulBuilder(
-                  builder: (context, setDialogState) => AlertDialog(
-                    title: const Text('Ocijenite saradnju'),
-                    content: Form(
-                        key: formKey,
-                        child:
-                            Column(mainAxisSize: MainAxisSize.min, children: [
-                          DropdownButtonFormField<int>(
-                            initialValue: rating,
-                            decoration:
-                                const InputDecoration(labelText: 'Ocjena'),
-                            items: [1, 2, 3, 4, 5]
-                                .map((value) => DropdownMenuItem(
-                                    value: value, child: Text('$value / 5')))
-                                .toList(),
-                            onChanged: (value) =>
-                                setDialogState(() => rating = value ?? 5),
-                          ),
-                          TextFormField(
-                            controller: comment,
-                            maxLines: 3,
-                            maxLength: 500,
-                            decoration:
-                                const InputDecoration(labelText: 'Komentar'),
-                            validator: (value) =>
-                                (value ?? '').trim().length < 4
-                                    ? 'Unesite najmanje 4 znaka.'
-                                    : null,
-                          ),
-                        ])),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(dialogContext, false),
-                          child: const Text('Odustani')),
-                      ElevatedButton(
-                          onPressed: () {
-                            if (formKey.currentState!.validate())
-                              Navigator.pop(dialogContext, true);
-                          },
-                          child: const Text('Objavi')),
-                    ],
-                  ),
-                )) ??
-        false;
-    if (submitted && mounted) {
-      try {
-        await _repository.saveReview(
-            widget.mentor.id, rating, comment.text.trim());
-        await _loadReviews();
-        if (mounted)
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Recenzija je sačuvana.')));
-      } catch (error) {
-        if (mounted)
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Recenzija nije sačuvana: $error')));
-      }
-    }
-    comment.dispose();
-  }
+  late Future<_MentorDetailData> _future;
 
   @override
   void initState() {
     super.initState();
-    _loadReviews();
+    _future = _load();
   }
 
-  Future<void> _loadReviews() async {
-    try {
-      final reviews = await _repository.getMentorReviews(widget.mentor.id);
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _reviews = reviews;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _reviews = const [];
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoadingReviews = false);
-      }
-    }
+  Future<_MentorDetailData> _load() async {
+    final results = await Future.wait([
+      _mentorRepository.getMentorById(widget.mentorProfileId),
+      _mentorRepository.getSimilarMentors(widget.mentorProfileId),
+      _subscriptionRepository.getMySubscriptions(),
+    ]);
+    final subscriptions = results[2] as List<Subscription>;
+    final blocking = subscriptions
+        .where((s) => _blockingStatuses.contains(s.status))
+        .toList();
+    return _MentorDetailData(
+      mentor: results[0] as MentorDetail,
+      similar: results[1] as List<MentorSummary>,
+      hasBlockingSubscription: blocking.isNotEmpty,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final mentor = widget.mentor;
-    final accentColor = Color(mentor.accentColorValue);
+    return AppModalPage(
+      body: FutureBuilder<_MentorDetailData>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const LoadingView();
+          }
+          if (snapshot.hasError) {
+            return ErrorView(
+              message: ApiException.from(snapshot.error!).message,
+              onRetry: () => setState(() {
+                _future = _load();
+              }),
+            );
+          }
+          final data = snapshot.data!;
+          final mentor = data.mentor;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mentor profile')),
-      body: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                AppPanel(
-                  gradient: LinearGradient(
-                    colors: [
-                      accentColor.withValues(alpha: 0.28),
-                      AppTheme.surfaceColor,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 32,
-                            backgroundColor:
-                                accentColor.withValues(alpha: 0.18),
-                            child: Text(
-                              mentor.name
-                                  .split(' ')
-                                  .where((part) => part.isNotEmpty)
-                                  .map((part) => part[0])
-                                  .take(2)
-                                  .join(),
-                              style: TextStyle(
-                                color: accentColor,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  mentor.name,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineMedium,
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  '${mentor.category} | ${mentor.city}',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(
-                                        color: AppTheme.textMutedColor,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Text(
-                              '\$${mentor.price.toStringAsFixed(0)}/mo',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      Text(mentor.headline,
-                          style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 12),
-                      Text(mentor.about),
-                      const SizedBox(height: 18),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          _TagStat(
-                              label: mentor.nextStartLabel,
-                              accentColor: accentColor),
-                          _TagStat(
-                              label: mentor.responseTimeLabel,
-                              accentColor: accentColor),
-                          _TagStat(
-                            label: '${mentor.activeClients} active clients',
-                            accentColor: accentColor,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+          return ListView(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: AppNetworkImage(
+                  url: mentor.profileImageUrl,
+                  height: 260,
+                  borderRadius: 24,
+                  placeholderIcon: Icons.person_rounded,
                 ),
-                const SizedBox(height: 24),
-                const SectionHeader(
-                  title: 'Specialties',
-                  subtitle: 'Areas this mentor actively programs and reviews.',
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: mentor.specialties
-                      .map(
-                        (specialty) => Chip(
-                          label: Text(specialty),
-                          avatar: Icon(Icons.check_rounded,
-                              color: accentColor, size: 18),
-                        ),
-                      )
-                      .toList(),
-                ),
-                const SizedBox(height: 24),
-                const SectionHeader(
-                  title: 'Client feedback',
-                  subtitle:
-                      'Short proof of the coaching style before you subscribe.',
-                ),
-                const SizedBox(height: 12),
-                AppPanel(
-                  color: AppTheme.surfaceColor,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Rating ${mentor.rating.toStringAsFixed(1)}/5',
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: accentColor,
-                                ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_isLoadingReviews)
-                        const CircularProgressIndicator()
-                      else if (_reviews.isEmpty)
-                        const Text('Još nema recenzija.')
-                      else
-                        ..._reviews.map((review) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: Text(
-                                  '${review['clientName'] ?? 'Klijent'} • ${review['rating']}/5\n${review['comment'] ?? ''}'),
-                            )),
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                          onPressed: _writeReview,
-                          child: const Text('Napiši recenziju')),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const SectionHeader(
-                  title: 'Next step',
-                  subtitle:
-                      'The flow is mentor detail -> questionnaire -> subscription.',
-                ),
-                const SizedBox(height: 12),
-                Row(
+              ),
+              const SizedBox(height: 18),
+              Center(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  SubscriptionScreen(mentor: mentor),
-                            ),
-                          );
-                        },
-                        child: const Text('View subscription'),
+                    Text('IME: ${mentor.fullName.toUpperCase()}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: AppTheme.accent,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18)),
+                    if (mentor.nickname != null && mentor.nickname!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('AKA ${mentor.nickname}',
+                            style: const TextStyle(
+                                color: AppTheme.accent,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16)),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  QuestionnaireScreen(mentor: mentor),
-                            ),
-                          );
-                        },
-                        child: const Text('Start questionnaire'),
-                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('GODINE: ${mentor.age}',
+                          style: const TextStyle(
+                              color: AppTheme.accent,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16)),
                     ),
                   ],
                 ),
-              ]),
+              ),
+              const SizedBox(height: 10),
+              Center(child: StarRating(rating: mentor.averageRating)),
+              const SizedBox(height: 4),
+              Center(
+                child: Text(
+                    '${mentor.reviewCount} recenzija · ${mentor.yearsOfExperience} god. iskustva',
+                    style: const TextStyle(
+                        color: AppTheme.textMuted, fontSize: 12.5)),
+              ),
+              const SizedBox(height: 20),
+              const Text('OPIS',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: AppTheme.accent,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18)),
+              const SizedBox(height: 10),
+              AppPanel(
+                child: Text(
+                  mentor.bio,
+                  style: const TextStyle(height: 1.5),
+                ),
+              ),
+              if (mentor.specializationNames.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: mentor.specializationNames
+                      .map((s) => Chip(label: Text(s)))
+                      .toList(),
+                ),
+              ],
+              const SizedBox(height: 22),
+              Text('RECENZIJE (${mentor.reviews.length})',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 15)),
+              const SizedBox(height: 10),
+              if (mentor.reviews.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('Još nema recenzija za ovog mentora.',
+                      style: TextStyle(color: AppTheme.textMuted)),
+                )
+              else
+                for (final review in mentor.reviews)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _ReviewTile(review: review),
+                  ),
+              if (data.similar.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                const Text('SLIČNI MENTORI',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 150,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: data.similar.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    itemBuilder: (context, index) {
+                      final similar = data.similar[index];
+                      return _SimilarMentorCard(mentor: similar);
+                    },
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              if (data.hasBlockingSubscription)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    'Već imate aktivnu ili započetu saradnju sa mentorom. '
+                    'Otkažite postojeću pretplatu prije nego odaberete novog mentora.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: AppTheme.textMuted, fontSize: 12.5),
+                  ),
+                ),
+              PrimaryButton(
+                label:
+                    'KUPI PLAN ${Formatters.price(mentor.monthlyPrice, mentor.currency)}',
+                onPressed: data.hasBlockingSubscription
+                    ? null
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => QuestionnaireScreen(mentor: mentor),
+                          ),
+                        ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MentorDetailData {
+  const _MentorDetailData({
+    required this.mentor,
+    required this.similar,
+    required this.hasBlockingSubscription,
+  });
+
+  final MentorDetail mentor;
+  final List<MentorSummary> similar;
+  final bool hasBlockingSubscription;
+}
+
+class _ReviewTile extends StatelessWidget {
+  const _ReviewTile({required this.review});
+
+  final Review review;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppPanel(
+      color: AppTheme.surface,
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppNetworkImage(
+            url: review.clientPhotoUrl,
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(review.clientFullName,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                    StarRating(rating: review.rating.toDouble(), size: 14),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(review.comment, style: const TextStyle(fontSize: 13.5)),
+              ],
             ),
           ),
         ],
@@ -332,28 +285,45 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
   }
 }
 
-class _TagStat extends StatelessWidget {
-  const _TagStat({
-    required this.label,
-    required this.accentColor,
-  });
+class _SimilarMentorCard extends StatelessWidget {
+  const _SimilarMentorCard({required this.mentor});
 
-  final String label;
-  final Color accentColor;
+  final MentorSummary mentor;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: accentColor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: accentColor,
+    return SizedBox(
+      width: 120,
+      child: AppPanel(
+        padding: const EdgeInsets.all(10),
+        onTap: () {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) =>
+                  MentorDetailScreen(mentorProfileId: mentor.mentorProfileId),
             ),
+          );
+        },
+        child: Column(
+          children: [
+            AppNetworkImage(
+              url: mentor.profileImageUrl,
+              width: 70,
+              height: 70,
+              borderRadius: 35,
+              yellowBorder: true,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              mentor.fullName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+            ),
+            StarRating(rating: mentor.averageRating, size: 12),
+          ],
+        ),
       ),
     );
   }
