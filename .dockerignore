@@ -4,6 +4,7 @@
 **/.dart_tool
 **/node_modules
 **/wwwroot/uploads
+**/private-files
 **/*.user
 .git
 .vs
