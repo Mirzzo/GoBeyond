@@ -98,11 +98,26 @@ Svaka stavka prijave (2.1, 2.2, 3.1.x, 3.2.x, 5, Obim) i svako pravilo iz uputa 
 
 Napomena: `flutter build windows` na ovoj mašini pada jer je Windows Developer Mode isključen (Flutter traži symlinkove za pluginove). Korisnik ga treba uključiti: Settings → System → For developers.
 
-## Sljedeći koraci
+### Završna provjera (svježi klon, kao ocjenjivač) — PROŠLO
+- `git clone` → `docker compose up -d --build` bez `.env` i bez ikakvih izmjena: svih 5 servisa healthy za ~1 min.
+- Smoke 53/53: login za sve demo naloge, sve glavne rute po ulogama, certifikati (200 sa tokenom, 401 bez), email preko RabbitMQ → Mailpit, create-intent bez Stripe ključeva vraća 400 sa porukom.
+- `dotnet test` 120/120 · desktop analyze čist + 38/38 testova · mobile analyze čist + 18/18 testova.
+- README provjeren tvrdnju po tvrdnju — bez netačnosti. Nema commitanih tajni, nema apsolutnih lokalnih putanja.
+- Stack je ponovo podignut sa svježom bazom (`docker compose up -d --build`).
 
-- Sačekati izvještaje agenata (runda 1), uraditi review + ocjene, vratiti na doradu ispod 8.
-- Integracijski test: docker compose + desktop protiv živog API-ja; mobile preko analyze/testova (nema Android SDK-a na mašini).
-- README (pokretanje, demo nalozi, Stripe ključevi), commitovi po cjelinama.
+## Stanje: ZAVRŠENO (implementacija po prijavi i uputama)
+
+Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498b` backend · `cb668ed` desktop · `edffca2` mobile · `a5faae2` plaćanja · `0008fa5` mobile biblioteke · `d31394a` desktop certifikati · `b17bf33` + `516c915` privatni certifikati · `38b60ac` README · + docs.
+
+## Sljedeći koraci (korisnik)
+
+1. **Stripe TEST ključevi** u `.env` (`Payments__SecretKey`, `Payments__PublishableKey`) da plaćanje radi. Ocjenjivač mora moći platiti bez intervencije, pa odlučiti kako mu dostaviti ključeve. Ključevi se ne smiju commitati u javni repo osim ako je to svjesna odluka (samo TEST ključevi).
+2. **Windows Developer Mode** (Settings → System → For developers) — bez njega `flutter run -d windows` ne builda desktop.
+3. **Android emulator test** mobilne aplikacije (na ovoj mašini nema Android SDK-a): posebno Stripe PaymentSheet (flutter_stripe 13.1), upload slika, navigacija.
+4. Ručno proći desktop tokove (plan builder, izvještaji PDF/print) nakon uključenja Developer Mode-a.
+5. `git push` na GitHub (repo mora biti javan) — nije urađeno automatski.
+
+Poznata ograničenja: Stripe tokovi (uspješno plaćanje, refund, webhook) testirani samo unit testovima s lažnim gatewayem, ne protiv pravog Stripe-a; podsjetnik pred istek i automatski Expired nisu viđeni live (implementirani i pokriveni kodom).
 
 ## Kako nastaviti
 
