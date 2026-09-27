@@ -1,143 +1,120 @@
 # GoBeyond
 
-GoBeyond je RSII projekat sa .NET backendom i dva Flutter klijenta:
-- desktop panel za Admin/Mentor
-- mobilna app za Client
+Seminarski rad iz predmeta **Razvoj softvera II** (FIT Mostar), Mirza Rujanac, IB210020.
 
-## Repository layout
+GoBeyond povezuje mentore (fitness trenere) s klijentima kroz personalizovane sedmične planove treninga i ishrane, praćenje napretka i pretplatu na mentora.
 
-```text
-GoBeyond/
-|- GoBeyond.API/
-|  |- GoBeyond.sln
-|  |- GoBeyond.API/                # ASP.NET Core Web API
-|  |- GoBeyond.Core/
-|  |- GoBeyond.Infrastructure/
-|  |- GoBeyond.Contracts/
-|  `- GoBeyond.EmailConsumer/
-|- UI/
-|  |- gobeyond_desktop/
-|  `- gobeyond_mobile/
-|- docker-compose.yml
-|- GoBeyond-Plan.md
-|- pravila.md
-`- init.md
+- **Desktop aplikacija** (Flutter, Windows) je za administratore i mentore.
+- **Mobilna aplikacija** (Flutter, Android) je za klijente.
+- **Backend** je ASP.NET Core 9 REST API sa SQL Serverom (baza `210020`) i pomoćnim servisom `GoBeyond.EmailConsumer`, koji poruke prima preko RabbitMQ-a.
+
+## Pristupni podaci
+
+Lozinka za sve naloge je `test`.
+
+| Aplikacija | Korisničko ime | Uloga |
+|---|---|---|
+| Desktop | `desktop` | Administrator |
+| Desktop | `admin` | Administrator |
+| Desktop | `mentor` | Mentor |
+| Mobilna | `mobile` | Klijent |
+| Mobilna | `client` | Klijent |
+
+Prijava radi sa korisničkim imenom ili email adresom. U bazi postoje i drugi seed korisnici (mentori po vrstama treninga, mentori koji čekaju odobrenje, klijenti u raznim statusima pretplate), svi sa lozinkom `test`.
+
+**Stripe testna kartica:** `4242 4242 4242 4242`, bilo koji budući datum, bilo koji CVC i poštanski broj.
+
+## Pokretanje
+
+### 1. Backend (Docker)
+
+Preduslov je Docker Desktop. Iz root foldera repozitorija pokrenite:
+
+```bash
+docker compose up -d --build
 ```
 
-## Run backend (Visual Studio)
+Pokreće se pet servisa:
 
-1. Otvori `GoBeyond.API/GoBeyond.sln`.
-2. Postavi startup project: `GoBeyond.API`.
-3. Pokreni `F5` ili `Ctrl+F5`.
+| Servis | Adresa |
+|---|---|
+| REST API + Swagger | http://localhost:5000/swagger |
+| SQL Server (baza `210020`) | `localhost,1433` (`sa` / `GoBeyondDemo!210020`) |
+| RabbitMQ management | http://localhost:15672 (`gobeyond` / `GoBeyondDemoRabbit`) |
+| Mailpit (pregled poslanih emailova) | http://localhost:8025 |
+| `email-consumer` | pomoćni servis, nema port |
 
-Konfiguracija je na:
-- `http://localhost:5000`
-- Swagger auto-open (`/swagger`)
+Pri prvom pokretanju API sam primijeni migracije i napuni bazu demo podacima (1–2 minute dok SQL Server ne postane dostupan). Za potpuno svježu bazu pokrenite `docker compose down -v`, pa ponovo `docker compose up -d --build`.
 
-Napomena:
-- Ako zaustavis debugging u Visual Studio, API proces se gasi.
-- Ako samo zatvoris browser tab, API nastavlja da radi dok ga ne ugasis iz VS.
+### 2. Stripe ključevi (plaćanje pretplate)
 
-## Run backend (CLI)
+Plaćanje ide preko Stripe-a u TEST modu. Ključevi se ne nalaze u kodu.
 
-```powershell
-cd GoBeyond.API/GoBeyond.API
-dotnet run --launch-profile http
-```
+1. Kopirajte `.env.example` u `.env` (u root folderu).
+2. Upišite `Payments__SecretKey` (`sk_test_...`) i `Payments__PublishableKey` (`pk_test_...`) sa https://dashboard.stripe.com/test/apikeys.
+3. Pokrenite `docker compose up -d` ponovo.
 
-Swagger: `http://localhost:5000/swagger`
+Mobilna aplikacija publishable ključ dobija od API-ja, pa se ne podešava u Flutteru. Bez ključeva sve ostalo radi, a pokušaj plaćanja vraća poruku "Stripe plaćanje nije konfigurisano na serveru."
 
-## Seed test users (trenutno stanje)
+### 3. Desktop aplikacija (Windows)
 
-- Admin: `admin@gobeyond.local` / `Admin123!`
-- Mentor: `mentor@gobeyond.local` / `Mentor123!`
-- Client: `client@gobeyond.local` / `Client123!`
-
-## Run Flutter desktop
-
-```powershell
+```bash
 cd UI/gobeyond_desktop
 flutter pub get
 flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 ```
 
-Desktop API URL koristi `GO_BEYOND_API_URL` i po defaultu pada na `http://localhost:5000`.
+Flutter na Windowsu za pluginove traži uključen **Developer Mode** (Settings → System → For developers).
 
-## Run Flutter mobile
+### 4. Mobilna aplikacija (Android emulator)
 
-```powershell
+```bash
 cd UI/gobeyond_mobile
 flutter pub get
-flutter run --dart-define=GO_BEYOND_API_URL=http://localhost:5000
+flutter run --dart-define=GO_BEYOND_API_URL=http://10.0.2.2:5000
 ```
 
-## Current implementation status (short)
+`10.0.2.2` je adresa host računara iz Android emulatora. Za fizički uređaj koristite IP adresu računara (npr. `http://192.168.1.10:5000`).
 
-- Implementirano:
-  - Auth (login/register/refresh/change-password)
-  - Role policies (AdminOnly, MentorOnly, ClientOnly, MentorOrAdmin)
-  - Desktop shell sa role-based navigacijom
-  - User profile CRUD endpointi (`/api/user-profile/me`)
-  - Desktop User Profile ekran + Save Changes flow
-  - Admin flow:
-    - mentor requests approve/reject
-    - mentors/clients/subscriptions list + search + role actions
-    - overview reporting + mentor drilldown + CSV export
-  - Mentor flow:
-    - collaboration requests
-    - subscribers + client detail
-    - create draft / publish training plan
-    - published plans pregled
-  - Mobile client flow:
-    - login/register + persisted session
-    - mentor browse/detail/recommendations
-    - questionnaire + subscription + payment confirmation
-    - current plan, progress history i profile edit
-  - DTO/mapper cleanup:
-    - `GoBeyond.Core.DTOs.Mvp` je flattenovan u `GoBeyond.Core.DTOs`
-    - `MvpDtos.cs` je zamijenjen sa `AppDtos.cs`
-    - `MvpMapper.cs` je zamijenjen sa `DtoMapper.cs`
-  - Domen endpointi za prijavljeni scope vise ne vracaju `501 Not Implemented`
-  - Flutter appovi koriste `--dart-define` za API base URL
+## Konfiguracija
 
-- Jos nije zavrseno:
-  - RabbitMQ consumer flow jos nije stvarno povezan na queue
+- Sva konfiguracija backenda i pomoćnog servisa je na jednom mjestu: `appsettings.Shared.json`. To su konekcijski string, JWT, RabbitMQ, SMTP, Stripe, intervali obavijesti i ograničenja uploada.
+- Vrijednosti se mogu pregaziti environment varijablama u formatu `Sekcija__Kljuc`, preko `.env` fajla ili `docker-compose.yml`. U `docker-compose.yml` su pregažena samo host imena Docker servisa.
+- Flutter aplikacije adresu API-ja čitaju iz `--dart-define=GO_BEYOND_API_URL=...`.
 
-## Verification
+## Arhitektura
 
-- Desktop:
-  - `flutter analyze lib test` prolazi
-  - `flutter test test/widget_test.dart` prolazi
-- Mobile:
-  - `flutter analyze lib test` prolazi
-  - `flutter test test/widget_test.dart` prolazi
-- Backend:
-  - kontroleri i DTO/mapper reference su uskladjeni nakon zadnjih rename promjena
-  - lokalni `dotnet build` i dalje moze pasti zbog ostecenog .NET 9 SDK/MSBuild okruzenja na masini, ne zbog prijavljenog compile error-a u repou
-
-## Troubleshooting
-
-### Port 5000 already in use
-
-```powershell
-netstat -ano | findstr :5000
-taskkill /PID <PID> /F
+```text
+GoBeyond.API/
+  GoBeyond.API             REST API: kontroleri, auth (JWT + refresh token), middleware, hosted servisi
+  GoBeyond.Core            entiteti, DTO-i, enumi, search objekti
+  GoBeyond.Infrastructure  EF Core (SQL Server), servisi, state machine planova, recommender, outbox, Stripe
+  GoBeyond.Contracts       poruke i opcije za RabbitMQ
+  GoBeyond.EmailConsumer   pomoćni servis: RabbitMQ consumer → SMTP
+  GoBeyond.Tests           xUnit testovi
+UI/
+  gobeyond_desktop         Flutter desktop (admin + mentor)
+  gobeyond_mobile          Flutter mobile (klijent)
+docs/api-contract.md       API ugovor između backenda i klijentskih aplikacija
 ```
 
-### Flutter CMake cache mismatch nakon premjestanja u `UI/`
+- **Mikroservisi / RabbitMQ.** API domensku promjenu i email poruku upisuje u istoj transakciji (outbox tabela). `OutboxDispatcher` poruke objavljuje na queue `gobeyond.notifications`. `GoBeyond.EmailConsumer` ih konzumira i šalje email preko SMTP-a (Mailpit). Nakon 5 neuspjelih pokušaja poruka ide u `gobeyond.notifications.dead`.
+- **Automatske obavijesti.** `SubscriptionLifecycleService` periodično:
+  - označava istekle pretplate,
+  - šalje podsjetnik pred istek,
+  - upozorava mentora kad plan nije objavljen,
+  - javlja klijentu kad je neaktivan.
+- **Sistem preporuke (content-based filtering).**
+  - Za svakog mentora gradi se vektor osobina: vrsta treninga, specijalizacije (ciljevi), ciljevi klijenata s kojima je uspješno sarađivao i iskustvo. Ocjena ulazi kao Bayesov prosjek.
+  - Za klijenta se gradi vektor iz željene vrste treninga, vrsta treninga ranijih mentora, primarnog cilja i nivoa spreme.
+  - Mentori se rangiraju po **kosinusnoj sličnosti**. Ista mjera između mentora daje "Slični mentori" na detaljima mentora.
+- **Planovi (State Machine).** Draft → Published → Archived. Objava zahtijeva popunjenih svih 7 dana, a svaka izmjena objavljenog plana obavještava klijenta.
+- **Šifarnici** (vrste treninga, ciljevi, nivoi spreme, spolovi) koriste generički BaseCRUD kontroler i servis sa SearchObject-ima.
 
-```powershell
-cd UI/gobeyond_desktop
-flutter clean
-Remove-Item -Recurse -Force build\windows\x64 -ErrorAction SilentlyContinue
-flutter pub get
-flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
+## Testovi
+
+```bash
+dotnet test GoBeyond.API/GoBeyond.sln
+cd UI/gobeyond_desktop && flutter test
+cd UI/gobeyond_mobile && flutter test
 ```
-
-### .NET build pada bez jasne greske
-
-Ako `dotnet build` stane na `Determining projects to restore...` bez compiler error-a, provjeri lokalni .NET SDK/MSBuild install.
-
-Na ovoj masini je zabiljezen problem sa nedostajucim workload resolver folderima pod:
-- `C:\Program Files\dotnet\sdk\9.0.200\Sdks\Microsoft.NET.SDK.WorkloadAutoImportPropsLocator`
-- `C:\Program Files\dotnet\sdk\9.0.200\Sdks\Microsoft.NET.SDK.WorkloadManifestTargetsLocator`
