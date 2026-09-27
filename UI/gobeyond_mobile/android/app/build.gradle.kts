@@ -24,7 +24,10 @@ android {
         applicationId = "com.example.gobeyond_mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 21
+        // flutter_secure_storage >=11.0.0 requires minSdk 24 (Android 7.0); Flutter
+        // 3.35+ already defaults to 24 itself (flutter.minSdkVersion), so track that
+        // instead of a hardcoded value that could silently fall behind again.
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
