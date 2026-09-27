@@ -8,6 +8,12 @@ public sealed class UploadOptions
     public string[] ImageExtensions { get; set; } = [];
     public string[] CertificateExtensions { get; set; } = [];
 
+    /// <summary>Privatni folder (izvan wwwroot, ne servira se statički) za certifikate; relativno na content root ili apsolutno.</summary>
+    public string PrivateRoot { get; set; } = string.Empty;
+
+    /// <summary>Folder sa privatnim seed fajlovima (demo certifikati); relativno na content root.</summary>
+    public string SeedFilesRoot { get; set; } = string.Empty;
+
     /// <summary>Najveća veličina fajla u MB (za poruke korisniku).</summary>
     public string MaxFileSizeText => $"{MaxFileSizeBytes / (1024d * 1024d):0.#} MB";
 

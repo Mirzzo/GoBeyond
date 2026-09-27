@@ -1,5 +1,4 @@
 using GoBeyond.Infrastructure.Database;
-using Microsoft.EntityFrameworkCore;
 
 namespace GoBeyond.API.Extensions;
 
@@ -20,9 +19,7 @@ public static class DatabaseInitializationExtensions
             try
             {
                 using var scope = app.Services.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<GoBeyondDbContext>();
-                await db.Database.MigrateAsync();
-                await scope.ServiceProvider.GetRequiredService<IDatabaseSeeder>().SeedAsync();
+                await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync();
                 logger.LogInformation("Database is migrated and seeded.");
                 return;
             }

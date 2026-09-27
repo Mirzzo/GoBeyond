@@ -1,2 +1,4 @@
 # Fajlovi koje korisnici uploaduju u toku rada (profilne slike, certifikati, slike napretka).
 wwwroot/uploads/
+# Privatni fajlovi (certifikati) pri lokalnom pokretanju; u Dockeru su u volume-u.
+private-files/

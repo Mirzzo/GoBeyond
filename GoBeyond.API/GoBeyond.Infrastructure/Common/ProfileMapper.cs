@@ -84,11 +84,14 @@ public static class ProfileMapper
         return dto;
     }
 
+    /// <summary>URL za preuzimanje certifikata (autorizovani endpoint; fajl nije javno dostupan).</summary>
+    public static string CertificateFileUrl(int certificateId) => $"/api/certificates/{certificateId}/file";
+
     public static CertificateDto ToCertificate(MentorCertificate certificate) => new()
     {
         Id = certificate.Id,
         FileName = certificate.FileName,
-        FileUrl = certificate.FileUrl,
+        FileUrl = CertificateFileUrl(certificate.Id),
         UploadedAt = certificate.UploadedAt,
         IsVerified = certificate.IsVerified
     };

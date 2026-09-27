@@ -17,21 +17,30 @@ public enum UploadKind
 
 public interface IFileStorageService
 {
-    /// <summary>Validira (ekstenzija, veličina, stvarni sadržaj) i snima fajl u wwwroot/uploads/{category}/{guid}.{ext}. Vraća relativni URL.</summary>
-    Task<string> SaveAsync(FileUpload file, string category, UploadKind kind, string fieldName, CancellationToken cancellationToken = default);
+    /// <summary>Javni fajl (wwwroot/uploads/{category}/{guid}.ext, dostupan po nepogodivom GUID URL-u). Vraća "/uploads/...".</summary>
+    Task<string> SavePublicAsync(FileUpload file, string category, UploadKind kind, string fieldName, CancellationToken cancellationToken = default);
 
-    /// <summary>Validacija bez snimanja (npr. prije kreiranja korisnika).</summary>
+    /// <summary>Privatni fajl (Uploads:PrivateRoot, izvan wwwroot). Vraća internu lokaciju "private://...".</summary>
+    Task<string> SavePrivateAsync(FileUpload file, string category, UploadKind kind, string fieldName, CancellationToken cancellationToken = default);
+
+    /// <summary>Validacija (ekstenzija, veličina, stvarni sadržaj) bez snimanja.</summary>
     void Validate(FileUpload file, UploadKind kind, string fieldName);
 
-    /// <summary>Briše ranije uploadovani fajl (seed fajlovi se nikad ne brišu).</summary>
-    void Delete(string? relativeUrl);
+    /// <summary>Fizička putanja privatnog fajla za zadanu lokaciju, ili null ako fajl ne postoji / lokacija nije dozvoljena.</summary>
+    string? ResolvePrivatePath(string location);
+
+    /// <summary>Briše uploadovani fajl (javni ili privatni); seed fajlovi se nikad ne brišu.</summary>
+    void Delete(string? location);
 }
 
 public sealed class FileStorageService(IHostEnvironment environment, IOptions<UploadOptions> options) : IFileStorageService
 {
     private const string UploadsFolder = "uploads";
 
-    private string WebRoot => Path.Combine(environment.ContentRootPath, "wwwroot");
+    private string WebRoot => Path.GetFullPath(Path.Combine(environment.ContentRootPath, "wwwroot"));
+    private string PublicUploadsRoot => Path.Combine(WebRoot, UploadsFolder);
+    private string PrivateRoot => Path.GetFullPath(Path.Combine(environment.ContentRootPath, options.Value.PrivateRoot));
+    private string SeedRoot => Path.GetFullPath(Path.Combine(environment.ContentRootPath, options.Value.SeedFilesRoot));
 
     public void Validate(FileUpload file, UploadKind kind, string fieldName)
     {
@@ -52,34 +61,91 @@ public sealed class FileStorageService(IHostEnvironment environment, IOptions<Up
             throw new ValidationException(fieldName, $"Sadržaj fajla \"{file.FileName}\" ne odgovara formatu {extension}. Dozvoljeni formati: {allowedText}.");
     }
 
-    public async Task<string> SaveAsync(FileUpload file, string category, UploadKind kind, string fieldName,
+    public async Task<string> SavePublicAsync(FileUpload file, string category, UploadKind kind, string fieldName,
         CancellationToken cancellationToken = default)
+    {
+        var relative = await SaveAsync(file, PublicUploadsRoot, category, kind, fieldName, cancellationToken);
+        return FileLocations.PublicPrefix + relative;
+    }
+
+    public async Task<string> SavePrivateAsync(FileUpload file, string category, UploadKind kind, string fieldName,
+        CancellationToken cancellationToken = default)
+    {
+        var relative = await SaveAsync(file, PrivateRoot, category, kind, fieldName, cancellationToken);
+        return FileLocations.PrivateScheme + relative;
+    }
+
+    public string? ResolvePrivatePath(string location)
+    {
+        foreach (var candidate in PrivateCandidates(location))
+            if (candidate is not null && File.Exists(candidate)) return candidate;
+        return null;
+    }
+
+    public void Delete(string? location)
+    {
+        if (string.IsNullOrWhiteSpace(location)) return;
+
+        string? path = null;
+        if (location.StartsWith(FileLocations.PrivateScheme, StringComparison.Ordinal))
+            path = SafeCombine(PrivateRoot, location[FileLocations.PrivateScheme.Length..]);
+        else if (location.StartsWith(FileLocations.PublicPrefix, StringComparison.Ordinal))
+            path = SafeCombine(PublicUploadsRoot, location[FileLocations.PublicPrefix.Length..]);
+
+        if (path is not null && File.Exists(path)) File.Delete(path);
+    }
+
+    /// <summary>
+    /// Mogući fizički fajlovi za lokaciju certifikata. Stari javni formati ("/uploads/certificates/...",
+    /// "/seed/certificates/...") iz baze prije prelaska na privatno skladište i dalje rade.
+    /// </summary>
+    private IEnumerable<string?> PrivateCandidates(string location)
+    {
+        if (location.StartsWith(FileLocations.PrivateScheme, StringComparison.Ordinal))
+        {
+            yield return SafeCombine(PrivateRoot, location[FileLocations.PrivateScheme.Length..]);
+        }
+        else if (location.StartsWith(FileLocations.SeedScheme, StringComparison.Ordinal))
+        {
+            yield return SafeCombine(SeedRoot, location[FileLocations.SeedScheme.Length..]);
+        }
+        else if (location.StartsWith(FileLocations.PublicPrefix, StringComparison.Ordinal))
+        {
+            var relative = location[FileLocations.PublicPrefix.Length..];
+            yield return SafeCombine(PrivateRoot, relative);
+            yield return SafeCombine(PublicUploadsRoot, relative);
+        }
+        else if (location.StartsWith(FileLocations.LegacySeedPrefix, StringComparison.Ordinal))
+        {
+            yield return SafeCombine(SeedRoot, location[FileLocations.LegacySeedPrefix.Length..]);
+        }
+    }
+
+    private async Task<string> SaveAsync(FileUpload file, string root, string category, UploadKind kind, string fieldName,
+        CancellationToken cancellationToken)
     {
         Validate(file, kind, fieldName);
 
         var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var folder = Path.Combine(WebRoot, UploadsFolder, category);
-        Directory.CreateDirectory(folder);
         var fileName = $"{Guid.NewGuid():N}{extension}";
+        Directory.CreateDirectory(Path.Combine(root, category));
 
-        await using (var target = File.Create(Path.Combine(folder, fileName)))
+        await using (var target = File.Create(Path.Combine(root, category, fileName)))
         await using (var source = file.OpenReadStream())
         {
             await source.CopyToAsync(target, cancellationToken);
         }
 
-        return $"/{UploadsFolder}/{category}/{fileName}";
+        return $"{category}/{fileName}";
     }
 
-    public void Delete(string? relativeUrl)
+    /// <summary>Spaja korijen i relativnu putanju; odbija putanje koje izlaze iz korijena (npr. "../").</summary>
+    private static string? SafeCombine(string root, string relative)
     {
-        if (string.IsNullOrWhiteSpace(relativeUrl) || !relativeUrl.StartsWith($"/{UploadsFolder}/", StringComparison.Ordinal))
-            return;
-
-        var root = Path.GetFullPath(Path.Combine(WebRoot, UploadsFolder));
-        var path = Path.GetFullPath(Path.Combine(WebRoot, relativeUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
-        if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase) && File.Exists(path))
-            File.Delete(path);
+        if (string.IsNullOrWhiteSpace(relative)) return null;
+        var full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
+        var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
+        return full.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase) ? full : null;
     }
 
     /// <summary>Provjera "magic bytes" potpisa da ekstenzija odgovara stvarnom sadržaju.</summary>

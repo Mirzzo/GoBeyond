@@ -10,6 +10,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using GoBeyond.Tests.TestInfrastructure;
 
 namespace GoBeyond.Tests.Payments;
 
@@ -218,8 +219,7 @@ public sealed class PaymentServiceTests : IDisposable
             }
         });
 
-    private GoBeyondDbContext CreateContext() =>
-        new SqliteTestDbContext(new DbContextOptionsBuilder<GoBeyondDbContext>().UseSqlite(_connection).Options);
+    private GoBeyondDbContext CreateContext() => SqliteTestDbContext.Create(_connection);
 
     private static (int SubscriptionId, int PaymentId) Seed(GoBeyondDbContext db)
     {
@@ -258,20 +258,5 @@ public sealed class PaymentServiceTests : IDisposable
         db.AddRange(mentor, client, subscription, payment);
         db.SaveChanges();
         return (subscription.Id, payment.Id);
-    }
-
-    /// <summary>
-    /// SQLite čuva decimal kao TEXT, pa bi SQL Server check constraint-i (npr. [WeightKg] BETWEEN 30 AND 300)
-    /// poredili tekst. Za testove se uklanjaju; ograničenja se testiraju na SQL Serveru kroz migraciju.
-    /// </summary>
-    private sealed class SqliteTestDbContext(DbContextOptions<GoBeyondDbContext> options) : GoBeyondDbContext(options)
-    {
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            base.OnModelCreating(modelBuilder);
-            foreach (var entity in modelBuilder.Model.GetEntityTypes())
-            foreach (var constraint in entity.GetCheckConstraints().ToList())
-                entity.RemoveCheckConstraint(constraint.ModelName);
-        }
     }
 }

@@ -60,7 +60,18 @@ if (app.Configuration.GetValue<bool>("Swagger:Enabled"))
     app.UseSwaggerUI();
 }
 
-app.UseStaticFiles(); // /seed/... i /uploads/... (wwwroot)
+// Certifikati se nikad ne serviraju statički (stari fajlovi iz wwwroot/uploads/certificates prije prelaska
+// na privatno skladište) - dostupni su samo kroz GET /api/certificates/{id}/file.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/uploads/certificates"))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+    await next();
+});
+app.UseStaticFiles(); // javne slike: /seed/avatars, /seed/progress, /uploads/profile, /uploads/progress
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers().RequireAuthorization(); // anonimno samo gdje piše [AllowAnonymous]
@@ -69,3 +80,6 @@ app.MapGet("/health", async (GoBeyondDbContext db, CancellationToken ct) =>
     .AllowAnonymous();
 
 await app.RunAsync();
+
+/// <summary>Vidljiv integracijskim testovima (WebApplicationFactory).</summary>
+public partial class Program;

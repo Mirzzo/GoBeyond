@@ -22,8 +22,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/publish .
-# wwwroot/seed (demo slike i certifikati) je dio image-a; wwwroot/uploads je Docker volume.
-RUN mkdir -p /app/wwwroot/uploads
+# wwwroot/seed (javne demo slike) i SeedFiles (privatni demo certifikati) su dio image-a;
+# wwwroot/uploads (javne slike) i private-files (certifikati) su Docker volume-i.
+RUN mkdir -p /app/wwwroot/uploads /app/private-files
 # aspnet image sluša na portu 8080 (ASPNETCORE_HTTP_PORTS).
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "GoBeyond.API.dll"]

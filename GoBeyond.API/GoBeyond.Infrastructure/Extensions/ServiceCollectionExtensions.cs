@@ -41,6 +41,7 @@ public static class ServiceCollectionExtensions
         services.AddDbContext<GoBeyondDbContext>(options =>
             options.UseSqlServer(configuration.GetConnectionString("MainDb")));
         services.AddScoped<IDatabaseSeeder, DatabaseSeeder>();
+        services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
         // Sigurnost
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
@@ -76,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<ICollaborationService, CollaborationService>();
         services.AddScoped<IMentorCertificateService, MentorCertificateService>();
+        services.AddScoped<ICertificateFileService, CertificateFileService>();
         services.AddScoped<IMentorCatalogService, MentorCatalogService>();
         services.AddScoped<IRecommendationService, RecommendationService>();
         services.AddScoped<ITrainingPlanService, TrainingPlanService>();

@@ -70,6 +70,7 @@ services:
       - '5000:8080'
     volumes:
       - gobeyond-uploads:/app/wwwroot/uploads
+      - gobeyond-private-files:/app/private-files
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -114,3 +115,4 @@ volumes:
   gobeyond-sqldata:
   gobeyond-rabbitdata:
   gobeyond-uploads:
+  gobeyond-private-files:

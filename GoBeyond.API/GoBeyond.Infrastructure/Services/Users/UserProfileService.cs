@@ -64,7 +64,7 @@ public sealed class UserProfileService(
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
                    ?? throw new NotFoundException(DomainTexts.UserNotFound);
 
-        var url = await files.SaveAsync(file, "profile", UploadKind.Image, "file", cancellationToken);
+        var url = await files.SavePublicAsync(file, "profile", UploadKind.Image, "file", cancellationToken);
         var previous = user.ProfileImageUrl;
         user.ProfileImageUrl = url;
         await db.SaveChangesAsync(cancellationToken);

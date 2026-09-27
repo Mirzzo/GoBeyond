@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 
 namespace GoBeyond.API.Extensions;
 
@@ -12,18 +12,19 @@ public static class SwaggerExtensions
         {
             options.SwaggerDoc("v1", new OpenApiInfo { Title = "GoBeyond API", Version = "v1" });
 
-            var scheme = new OpenApiSecurityScheme
+            options.AddSecurityDefinition(JwtBearerDefaults.AuthenticationScheme, new OpenApiSecurityScheme
             {
                 Name = "Authorization",
                 Description = "JWT access token (bez prefiksa \"Bearer\").",
                 In = ParameterLocation.Header,
                 Type = SecuritySchemeType.Http,
                 Scheme = "bearer",
-                BearerFormat = "JWT",
-                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = JwtBearerDefaults.AuthenticationScheme }
-            };
-            options.AddSecurityDefinition(scheme.Reference.Id, scheme);
-            options.AddSecurityRequirement(new OpenApiSecurityRequirement { { scheme, Array.Empty<string>() } });
+                BearerFormat = "JWT"
+            });
+            options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+            {
+                [new OpenApiSecuritySchemeReference(JwtBearerDefaults.AuthenticationScheme, document)] = []
+            });
         });
         return services;
     }

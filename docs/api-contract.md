@@ -6,7 +6,7 @@ Verzija 1 (27.09.2026). Backend implementira tačno ovaj ugovor. Ako backend mor
 
 - Base URL: desktop `http://localhost:5000`, Android emulator `http://10.0.2.2:5000`; oba Flutter klijenta čitaju `--dart-define=GO_BEYOND_API_URL=...`.
 - JSON je camelCase, enumi su stringovi (`"Active"`), datumi ISO-8601 UTC (`"2026-09-27T10:00:00Z"`), a `dateOfBirth` je `"yyyy-MM-dd"`.
-- Slike i fajlovi se vraćaju kao **relativne putanje** (`/uploads/...`, `/seed/...`). Klijent ih prefiksira base URL-om.
+- Slike i fajlovi se vraćaju kao **relativne putanje** (`/uploads/...`, `/seed/...`). Klijent ih prefiksira base URL-om. Izuzetak su certifikati mentora: njihov `fileUrl` je `/api/certificates/{id}/file` i zahtijeva `Authorization: Bearer` header (vidi §5).
 - Auth ide preko headera `Authorization: Bearer <accessToken>`. Access token traje 60 min. Refresh ide preko `POST /api/auth/refresh`.
 - Liste vraćaju JSON niz, osim šifarnika koji vraćaju `{ "items": [...], "totalCount": n }` (generički BaseCRUD obrazac s nastave).
 - Greške:
@@ -97,10 +97,11 @@ Korisnici:
 Mentori i zahtjevi:
 - `GET /api/admin/mentors?search=&trainingTypeId=&isActive=` → `[AdminMentor]`, gdje je `AdminMentor = { userId, mentorProfileId, fullName, nickname, username, email, profileImageUrl, trainingTypeName, monthlyPrice, averageRating, reviewCount, activeSubscribers, isActive }` (samo Approved).
 - `GET /api/admin/mentor-requests?search=&trainingTypeId=` → `[MentorRequest]` (Pending), gdje je `MentorRequest = { mentorProfileId, userId, fullName, email, trainingTypeName, yearsOfExperience, requestedAt, certificateCount }`.
-- `GET /api/admin/mentor-requests/{mentorProfileId}` → `MentorRequestDetail = MentorRequest + { nickname, bio, dateOfBirth, age, phoneNumber, monthlyPrice, specializationNames, profileImageUrl, certificates: [Certificate] }`, gdje je `Certificate = { id, fileName, fileUrl, uploadedAt, isVerified }`.
+- `GET /api/admin/mentor-requests/{mentorProfileId}` → `MentorRequestDetail = MentorRequest + { nickname, bio, dateOfBirth, age, phoneNumber, monthlyPrice, specializationNames, profileImageUrl, certificates: [Certificate] }`, gdje je `Certificate = { id, fileName, fileUrl, uploadedAt, isVerified }`, a `fileUrl` je uvijek `/api/certificates/{id}/file`.
 - `PUT /api/admin/mentor-requests/{mentorProfileId}/approve` → `{ message }`. Obavještava mentora (in-app + email).
 - `PUT /api/admin/mentor-requests/{mentorProfileId}/reject` → `{ reason (10–500) }` → `{ message }`.
 - `PUT /api/admin/certificates/{id}/verify` → `Certificate`.
+- `GET /api/certificates/{id}/file` (MentorOrAdmin: administrator ili mentor vlasnik certifikata) → sadržaj fajla sa `Content-Type` `application/pdf` / `image/png` / `image/jpeg` i `Content-Disposition: inline; filename="<originalni naziv>"` (uz `filename*=UTF-8''...` za dijakritike). Drugi mentor ili klijent → `403` "Nemate pristup ovom certifikatu.", bez tokena → `401`, nepostojeći certifikat ili fajl → `404`. Certifikati se čuvaju izvan `wwwroot` i nisu dostupni kao statički fajlovi.
 - `GET /api/admin/mentors/{mentorProfileId}/certificates` → `[Certificate]`.
 
 Klijenti:
@@ -125,7 +126,7 @@ Sistemske obavijesti:
 
 ## 6. Mentor (MentorOnly, prefiks `/api/mentors/me`)
 
-- `GET /api/mentors/me/certificates` → `[Certificate]`. `POST .../certificates` (multipart `files`) → `[Certificate]`. `DELETE .../certificates/{id}` → 204 (bar jedan mora ostati).
+- `GET /api/mentors/me/certificates` → `[Certificate]` (`fileUrl` = `/api/certificates/{id}/file`, preuzima se sa tokenom mentora). `POST .../certificates` (multipart `files`) → `[Certificate]`. `DELETE .../certificates/{id}` → 204 (bar jedan mora ostati).
 - `GET /api/mentors/me/collaboration-requests?search=` → `[CollaborationRequest]`. Uključuje pretplate AwaitingMentor i Active bez objavljenog plana. `CollaborationRequest = { subscriptionId, clientFullName, clientPhotoUrl, status, requestedAt, planId?, planStatus? }`.
 - `GET /api/mentors/me/collaboration-requests/{subscriptionId}` → `ClientDescription`:
   ```
@@ -259,3 +260,9 @@ Dodatno:
   - Politika `MentorOrAdmin` iz §0 je uklonjena jer je nijedan endpoint ne koristi (`GET /api/training-plans/{id}` i `.../sessions` provjeravaju vlasništvo u servisu).
   - Poruke o veličini fajla (uključujući `413`/prevelik zahtjev) sada se računaju iz `Uploads:MaxFileSizeBytes`.
   - Baza: dodani check constraint-i `ClientProfiles.TrainingExperienceYears` 0–60 i `DayPlans.NutritionDurationMinutes` NULL ili 1–1440 (i dalje jedna `InitialCreate` migracija; primjenjuju se pri sljedećem resetu baze).
+- v1.3 — sigurni certifikati i nadogradnja paketa (backend agent):
+  - **Certifikati više nisu javni.** Novi endpoint `GET /api/certificates/{id}/file` (administrator ili mentor vlasnik; ostali `403`, bez tokena `401`, nepostojeći `404`) vraća fajl sa ispravnim `Content-Type` i `Content-Disposition: inline; filename="..."`. U svim DTO-ima `Certificate.fileUrl` je sada `/api/certificates/{id}/file` (relativno; klijent ga prefiksira base URL-om i šalje `Authorization: Bearer` header, npr. `Image.network(url, headers: ...)` ili preuzimanje bajtova za PDF prikaz). Stari URL-ovi `/seed/certificates/...` i `/uploads/certificates/...` vraćaju `404`.
+  - Uploadovani certifikati se čuvaju izvan `wwwroot` u `Uploads:PrivateRoot` (Docker volume `gobeyond-private-files`), a demo certifikati u `SeedFiles/certificates` (dio image-a, nisu javni). Postojeći certifikati iz ranije baze i dalje se preuzimaju kroz novi endpoint (automatski fallback na stare lokacije).
+  - **Profilne slike i slike napretka ostaju javne po nepogodivom GUID URL-u** (`/uploads/profile/{guid}.png`, `/uploads/progress/{guid}.png`, `/seed/...`): prikazuju se na mnogo mjesta u obje aplikacije (liste mentora, recenzije, poruke) kroz obične `Image.network` pozive, nemaju osjetljiv sadržaj kao certifikati (lični dokumenti), a GUID naziv se ne može pogoditi niti izlistati (direktorij se ne lista).
+  - Politika `MentorOrAdmin` je ponovo u upotrebi (za `GET /api/certificates/{id}/file`).
+  - NuGet paketi nadograđeni na zadnje verzije kompatibilne sa net9.0 (Microsoft.* 9.0.20, RabbitMQ.Client 7.2.2, System.IdentityModel.Tokens.Jwt 8.23.0, Swashbuckle.AspNetCore 10.2.3, xunit 2.9.3); bez promjene API-ja i baze.

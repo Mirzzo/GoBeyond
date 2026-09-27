@@ -116,7 +116,7 @@ public sealed class AuthService(
         {
             foreach (var certificate in certificates)
             {
-                var url = await files.SaveAsync(certificate, "certificates", UploadKind.Certificate, "certificates", cancellationToken);
+                var url = await files.SavePrivateAsync(certificate, "certificates", UploadKind.Certificate, "certificates", cancellationToken);
                 savedUrls.Add(url);
                 mentor.Certificates.Add(new MentorCertificate
                 {

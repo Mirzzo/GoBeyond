@@ -47,7 +47,7 @@ public sealed class MentorCertificateService(
         {
             foreach (var file in files)
             {
-                var url = await fileStorage.SaveAsync(file, "certificates", UploadKind.Certificate, "files", cancellationToken);
+                var url = await fileStorage.SavePrivateAsync(file, "certificates", UploadKind.Certificate, "files", cancellationToken);
                 saved.Add(new MentorCertificate
                 {
                     MentorProfileId = mentor.Id,

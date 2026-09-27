@@ -102,7 +102,7 @@ public sealed class ProgressService(
                         .FirstOrDefaultAsync(x => x.ClientProfileId == clientId && x.Year == year && x.Month == month, cancellationToken)
                     ?? throw new NotFoundException("Prvo unesite parametre napretka za ovaj mjesec, pa dodajte sliku.");
 
-        var url = await files.SaveAsync(file, "progress", UploadKind.Image, "file", cancellationToken);
+        var url = await files.SavePublicAsync(file, "progress", UploadKind.Image, "file", cancellationToken);
         var previous = entry.PhotoUrl;
         entry.PhotoUrl = url;
         entry.UpdatedAt = DateTime.UtcNow;

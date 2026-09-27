@@ -12,15 +12,20 @@
     <!-- Fajlovi koje korisnici uploaduju nisu dio build-a (u Dockeru su u volume-u). -->
     <Content Remove="wwwroot\uploads\**" />
     <None Remove="wwwroot\uploads\**" />
+    <None Remove="private-files\**" />
+    <!-- Privatni demo certifikati: izvan wwwroot (nisu javni), ali se kopiraju uz aplikaciju i u Docker image. -->
+    <None Update="SeedFiles\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.2" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.2">
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.20" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.20">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+    <!-- Svi Microsoft.IdentityModel.* paketi moraju imati istu verziju (JwtBearer + System.IdentityModel.Tokens.Jwt). -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
   </ItemGroup>
 
   <ItemGroup>

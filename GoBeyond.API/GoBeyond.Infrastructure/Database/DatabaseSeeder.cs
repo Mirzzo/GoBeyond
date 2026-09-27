@@ -3,6 +3,7 @@ using GoBeyond.Core.Enums;
 using GoBeyond.Infrastructure.Common;
 using GoBeyond.Infrastructure.Configuration;
 using GoBeyond.Infrastructure.Security;
+using GoBeyond.Infrastructure.Services.Files;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -222,7 +223,7 @@ public sealed partial class DatabaseSeeder(
             profile.Certificates.Add(new MentorCertificate
             {
                 FileName = certificate.FileName,
-                FileUrl = $"/seed/certificates/{certificate.File}",
+                FileUrl = $"{FileLocations.SeedScheme}certificates/{certificate.File}",
                 UploadedAt = user.CreatedAt,
                 IsVerified = isApproved,
                 VerifiedAt = isApproved ? reviewedAt : null
@@ -673,7 +674,7 @@ public sealed partial class DatabaseSeeder(
         public required string Bio { get; init; }
     }
 
-    /// <param name="File">Fajl u /seed/certificates.</param>
+    /// <param name="File">Fajl u SeedFiles/certificates (nije javno dostupan, servira se kroz /api/certificates/{id}/file).</param>
     /// <param name="FileName">Originalni naziv koji je mentor uploadao.</param>
     private sealed record CertificateSeed(string File, string FileName);
 
