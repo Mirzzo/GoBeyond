@@ -34,6 +34,9 @@ class FakeAuthRepository implements AuthRepository {
   Map<String, dynamic>? loginResponse;
   ApiException? loginError;
 
+  /// When set, registerClient fails with it (e.g. server validation errors).
+  ApiException? registerError;
+
   @override
   Future<Map<String, dynamic>> login(
       String usernameOrEmail, String password) async {
@@ -44,6 +47,7 @@ class FakeAuthRepository implements AuthRepository {
   @override
   Future<Map<String, dynamic>> registerClient(
       Map<String, dynamic> payload) async {
+    if (registerError != null) throw registerError!;
     return _authResponse();
   }
 
@@ -76,6 +80,9 @@ class FakeAuthRepository implements AuthRepository {
 class FakeProfileRepository implements ProfileRepository {
   String dateOfBirth = '2000-01-01';
 
+  /// When set, updateMyProfile fails with it (e.g. server validation errors).
+  ApiException? updateError;
+
   @override
   Future<void> deletePhoto() async {}
 
@@ -105,8 +112,10 @@ class FakeProfileRepository implements ProfileRepository {
       });
 
   @override
-  Future<UserProfile> updateMyProfile(Map<String, dynamic> payload) =>
-      getMyProfile();
+  Future<UserProfile> updateMyProfile(Map<String, dynamic> payload) async {
+    if (updateError != null) throw updateError!;
+    return getMyProfile();
+  }
 
   @override
   Future<String> uploadPhoto(Uint8List bytes, String fileName) async =>

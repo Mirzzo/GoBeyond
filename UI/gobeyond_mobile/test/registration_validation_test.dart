@@ -91,5 +91,38 @@ void main() {
       );
       expect(find.text('Ime je obavezno (2–50 znakova).'), findsOneWidget);
     });
+
+    testWidgets('an unselected required dropdown asks to choose, in the '
+        "backend's wording", (tester) async {
+      final authController = AuthController(
+        authRepository: FakeAuthRepository(),
+        profileRepository: FakeProfileRepository(),
+        activityRepository: FakeActivityRepository(),
+      );
+
+      await tester.pumpWidget(
+        AuthScope(
+          controller: authController,
+          child: MaterialApp(
+            theme: AppTheme.theme,
+            home: Scaffold(
+              body: RegistrationForm(lookupRepository: FakeLookupRepository()),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('REGISTRUJ SE'));
+      await tester.tap(find.text('REGISTRUJ SE'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Odaberite spol.'), findsOneWidget);
+      expect(find.text('Odaberite nivo fizičke spreme.'), findsOneWidget);
+      expect(find.text('Odaberite fitness cilj.'), findsOneWidget);
+      for (final label in ['Spol', 'Nivo fizičke spreme', 'Fitness cilj']) {
+        expect(find.text('$label je obavezno.'), findsNothing);
+      }
+    });
   });
 }
