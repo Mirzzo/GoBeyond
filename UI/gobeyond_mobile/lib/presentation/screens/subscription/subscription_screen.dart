@@ -38,8 +38,9 @@ const _currentSubscriptionPriority = [
 /// PendingPayment subscription has no message thread yet on the backend.
 const _messageableStatuses = {'AwaitingMentor', 'Active'};
 
-/// Pretplata: current subscription card with actions (PRODUŽI/OTKAŽI/PORUKA
-/// MENTORU/RECENZIJA) plus the full subscription history.
+/// Pretplata: current subscription card with actions (PRODUŽI or NASTAVI
+/// PLAĆANJE, PORUKA MENTORU, DETALJI, recenzija, OTKAŽI PRETPLATU) plus the
+/// full subscription history.
 class SubscriptionScreen extends StatefulWidget {
   const SubscriptionScreen({
     super.key,
@@ -80,6 +81,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   void _reload() => setState(() {
         _future = _subscriptionRepository.getMySubscriptions();
       });
+
+  Future<void> _refresh() async {
+    final next = _subscriptionRepository.getMySubscriptions();
+    setState(() {
+      _future = next;
+    });
+    try {
+      await next;
+    } catch (_) {
+      // Surfaced via the FutureBuilder's own error state instead.
+    }
+  }
 
   /// Drives the Stripe PaymentSheet for both "NASTAVI PLAĆANJE" (a lingering
   /// PendingPayment subscription) and "PRODUŽI" (renewing an Active one) —
@@ -243,126 +256,147 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   @override
   Widget build(BuildContext context) {
     return GbScaffold(
-      body: FutureBuilder<List<Subscription>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const LoadingView();
-          }
-          if (snapshot.hasError) {
-            return ErrorView(
-              message: ApiException.from(snapshot.error!).message,
-              onRetry: _reload,
-            );
-          }
-
-          final subscriptions = snapshot.data!;
-          if (subscriptions.isEmpty) {
-            return const EmptyStateView(
-              message:
-                  'Nemate nijednu pretplatu. Odaberite mentora na početnoj stranici.',
-              icon: Icons.card_membership_rounded,
-            );
-          }
-
-          Subscription? current;
-          for (final status in _currentSubscriptionPriority) {
-            final match = subscriptions.where((s) => s.status == status);
-            if (match.isNotEmpty) {
-              current = match.first;
-              break;
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<Subscription>>(
+          future: _future,
+          builder: (context, snapshot) {
+            // A refresh keeps the loaded list on screen (FutureBuilder
+            // carries the previous data over while the new future runs).
+            if (!snapshot.hasData &&
+                snapshot.connectionState != ConnectionState.done) {
+              return const PullToRefreshFallback(child: LoadingView());
             }
-          }
-
-          final history = subscriptions.where((s) => s != current).toList();
-
-          return ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              const Text('TRENUTNA PRETPLATA',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-              const SizedBox(height: 12),
-              if (current == null)
-                const AppPanel(
-                  child: Text(
-                    'Trenutno nemate aktivnu pretplatu.',
-                    style: TextStyle(color: AppTheme.textMuted),
-                  ),
-                )
-              else
-                _CurrentSubscriptionCard(
-                  subscription: current,
-                  busy: _busy,
-                  onStartPayment: () => _startPayment(current!),
-                  onCancel: () => _cancel(current!),
-                  onMessage: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => MessageChatScreen(
-                        subscriptionId: current!.id,
-                        otherPartyName: current.mentorFullName,
-                        otherPartyPhotoUrl: current.mentorPhotoUrl,
-                      ),
-                    ),
-                  ),
-                  onWriteReview: () => _writeReview(current!),
-                  onEditReview: () => _editReview(current!),
-                  onDeleteReview: () => _deleteReview(current!),
+            if (snapshot.hasError) {
+              return PullToRefreshFallback(
+                child: ErrorView(
+                  message: ApiException.from(snapshot.error!).message,
+                  onRetry: _reload,
                 ),
-              const SizedBox(height: 28),
-              const Text('HISTORIJA AKTIVNOSTI',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-              const SizedBox(height: 12),
-              if (history.isEmpty)
-                const Text('Nema prethodnih pretplata.',
-                    style: TextStyle(color: AppTheme.textMuted))
-              else
-                for (final subscription in history)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: AppPanel(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => SubscriptionDetailScreen(
-                            subscriptionId: subscription.id,
-                            mentorFullName: subscription.mentorFullName,
-                          ),
+              );
+            }
+
+            final subscriptions = snapshot.data!;
+            if (subscriptions.isEmpty) {
+              return const PullToRefreshFallback(
+                child: EmptyStateView(
+                  message:
+                      'Nemate nijednu pretplatu. Odaberite mentora na početnoj stranici.',
+                  icon: Icons.card_membership_rounded,
+                ),
+              );
+            }
+
+            Subscription? current;
+            for (final status in _currentSubscriptionPriority) {
+              final match = subscriptions.where((s) => s.status == status);
+              if (match.isNotEmpty) {
+                current = match.first;
+                break;
+              }
+            }
+
+            final history = subscriptions.where((s) => s != current).toList();
+
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20),
+              children: [
+                const Text('TRENUTNA PRETPLATA',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                const SizedBox(height: 12),
+                if (current == null)
+                  const AppPanel(
+                    child: Text(
+                      'Trenutno nemate aktivnu pretplatu.',
+                      style: TextStyle(color: AppTheme.textMuted),
+                    ),
+                  )
+                else
+                  _CurrentSubscriptionCard(
+                    subscription: current,
+                    busy: _busy,
+                    onStartPayment: () => _startPayment(current!),
+                    onCancel: () => _cancel(current!),
+                    onMessage: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => MessageChatScreen(
+                          subscriptionId: current!.id,
+                          otherPartyName: current.mentorFullName,
+                          otherPartyPhotoUrl: current.mentorPhotoUrl,
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          AppNetworkImage(
-                            url: subscription.mentorPhotoUrl,
-                            width: 48,
-                            height: 48,
-                            borderRadius: 24,
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(subscription.mentorFullName,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w700)),
-                                const SizedBox(height: 3),
-                                Text(
-                                    subscriptionStatusLabel(
-                                        subscription.status),
-                                    style: const TextStyle(
-                                        color: AppTheme.textMuted,
-                                        fontSize: 12.5)),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.chevron_right_rounded,
-                              color: AppTheme.textMuted),
-                        ],
+                    ),
+                    onOpenDetail: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => SubscriptionDetailScreen(
+                          subscriptionId: current!.id,
+                          mentorFullName: current.mentorFullName,
+                        ),
                       ),
                     ),
+                    onWriteReview: () => _writeReview(current!),
+                    onEditReview: () => _editReview(current!),
+                    onDeleteReview: () => _deleteReview(current!),
                   ),
-            ],
-          );
-        },
+                const SizedBox(height: 28),
+                const Text('HISTORIJA AKTIVNOSTI',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                const SizedBox(height: 12),
+                if (history.isEmpty)
+                  const Text('Nema prethodnih pretplata.',
+                      style: TextStyle(color: AppTheme.textMuted))
+                else
+                  for (final subscription in history)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: AppPanel(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SubscriptionDetailScreen(
+                              subscriptionId: subscription.id,
+                              mentorFullName: subscription.mentorFullName,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            AppNetworkImage(
+                              url: subscription.mentorPhotoUrl,
+                              width: 48,
+                              height: 48,
+                              borderRadius: 24,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(subscription.mentorFullName,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700)),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                      subscriptionStatusLabel(
+                                          subscription.status),
+                                      style: const TextStyle(
+                                          color: AppTheme.textMuted,
+                                          fontSize: 12.5)),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right_rounded,
+                                color: AppTheme.textMuted),
+                          ],
+                        ),
+                      ),
+                    ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -375,6 +409,7 @@ class _CurrentSubscriptionCard extends StatelessWidget {
     required this.onStartPayment,
     required this.onCancel,
     required this.onMessage,
+    required this.onOpenDetail,
     required this.onWriteReview,
     required this.onEditReview,
     required this.onDeleteReview,
@@ -385,6 +420,7 @@ class _CurrentSubscriptionCard extends StatelessWidget {
   final VoidCallback onStartPayment;
   final VoidCallback onCancel;
   final VoidCallback onMessage;
+  final VoidCallback onOpenDetail;
   final VoidCallback onWriteReview;
   final VoidCallback onEditReview;
   final VoidCallback onDeleteReview;
@@ -396,6 +432,7 @@ class _CurrentSubscriptionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AppNetworkImage(
                 url: subscription.mentorPhotoUrl,
@@ -414,10 +451,19 @@ class _CurrentSubscriptionCard extends StatelessWidget {
                             fontWeight: FontWeight.w800, fontSize: 16)),
                     Text(subscription.trainingTypeName,
                         style: const TextStyle(color: AppTheme.textMuted)),
+                    const SizedBox(height: 8),
+                    // On its own line (not squeezed into the header row)
+                    // so a long status ("Čeka prihvatanje mentora") never
+                    // forces the mentor's name to wrap mid-word.
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Chip(
+                          label: Text(
+                              subscriptionStatusLabel(subscription.status))),
+                    ),
                   ],
                 ),
               ),
-              Chip(label: Text(subscriptionStatusLabel(subscription.status))),
             ],
           ),
           const SizedBox(height: 14),
@@ -429,86 +475,101 @@ class _CurrentSubscriptionCard extends StatelessWidget {
           _InfoLine('Cijena',
               Formatters.price(subscription.price, subscription.currency)),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              if (subscription.status == 'PendingPayment')
-                SizedBox(
-                  width: 190,
-                  child: PrimaryButton(
-                    label: 'NASTAVI PLAĆANJE',
-                    height: 46,
-                    isLoading: busy,
-                    onPressed: onStartPayment,
-                  ),
-                )
-              else if (subscription.canRenew)
-                SizedBox(
-                  width: 150,
-                  child: PrimaryButton(
-                      label: 'PRODUŽI',
-                      height: 46,
-                      isLoading: busy,
-                      onPressed: onStartPayment),
-                ),
-              if (subscription.canCancel)
-                SizedBox(
-                  width: 150,
-                  child: OutlinedButton(
-                    onPressed: busy ? null : onCancel,
-                    child: const Text('OTKAŽI'),
-                  ),
-                ),
-              // A message thread only exists once the mentor has seen the
-              // request (AwaitingMentor) or accepted it (Active); a
-              // PendingPayment subscription has no thread yet on the backend.
-              if (_messageableStatuses.contains(subscription.status))
-                SizedBox(
-                  width: 190,
-                  child: OutlinedButton.icon(
-                    onPressed: onMessage,
-                    icon:
-                        const Icon(Icons.chat_bubble_outline_rounded, size: 18),
-                    label: const Text('PORUKA MENTORU'),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (subscription.canReview)
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onWriteReview,
-                icon: const Icon(Icons.star_border_rounded),
-                label: const Text('NAPIŠI RECENZIJU'),
+          // One full-width action per row: every button has the same width
+          // and a long label never wraps or squeezes its neighbour.
+          for (final (index, action) in [
+            if (subscription.status == 'PendingPayment')
+              PrimaryButton(
+                label: 'NASTAVI PLAĆANJE',
+                height: 46,
+                isLoading: busy,
+                onPressed: onStartPayment,
+              )
+            else if (subscription.canRenew)
+              PrimaryButton(
+                label: 'PRODUŽI',
+                height: 46,
+                isLoading: busy,
+                onPressed: onStartPayment,
               ),
-            )
-          else if (subscription.reviewId != null)
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onEditReview,
-                    icon: const Icon(Icons.edit_rounded, size: 18),
-                    label: const Text('UREDI RECENZIJU'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onDeleteReview,
-                    icon: const Icon(Icons.delete_outline_rounded,
-                        size: 18, color: AppTheme.danger),
-                    label: const Text('OBRIŠI',
-                        style: TextStyle(color: AppTheme.danger)),
-                  ),
-                ),
-              ],
+            // A message thread only exists once the mentor has seen the
+            // request (AwaitingMentor) or accepted it (Active); a
+            // PendingPayment subscription has no thread yet on the backend.
+            if (_messageableStatuses.contains(subscription.status))
+              _CardAction(
+                icon: Icons.chat_bubble_outline_rounded,
+                label: 'PORUKA MENTORU',
+                onPressed: onMessage,
+              ),
+            // The only in-app route to this subscription's payments and
+            // questionnaire answers, for every status (including a new
+            // PendingPayment one, right after paying).
+            _CardAction(
+              icon: Icons.receipt_long_rounded,
+              label: 'DETALJI',
+              onPressed: onOpenDetail,
             ),
+            if (subscription.canReview)
+              _CardAction(
+                icon: Icons.star_border_rounded,
+                label: 'NAPIŠI RECENZIJU',
+                onPressed: onWriteReview,
+              )
+            else if (subscription.reviewId != null) ...[
+              _CardAction(
+                icon: Icons.edit_rounded,
+                label: 'UREDI RECENZIJU',
+                onPressed: onEditReview,
+              ),
+              _CardAction(
+                icon: Icons.delete_outline_rounded,
+                label: 'OBRIŠI RECENZIJU',
+                color: AppTheme.danger,
+                onPressed: onDeleteReview,
+              ),
+            ],
+            if (subscription.canCancel)
+              _CardAction(
+                icon: Icons.cancel_outlined,
+                label: 'OTKAŽI PRETPLATU',
+                onPressed: busy ? null : onCancel,
+              ),
+          ].indexed) ...[
+            if (index > 0) const SizedBox(height: 10),
+            action,
+          ],
         ],
       ),
+    );
+  }
+}
+
+/// A secondary action on the current subscription card: an outlined button
+/// as tall as the primary one (46) and as wide as the card.
+class _CardAction extends StatelessWidget {
+  const _CardAction({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        minimumSize: const Size.fromHeight(46),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      ),
+      icon: Icon(icon, size: 18),
+      label: Text(label, overflow: TextOverflow.ellipsis),
     );
   }
 }
@@ -605,7 +666,10 @@ class _ReviewDialogState extends State<_ReviewDialog> {
               maxLength: 1000,
               decoration: const InputDecoration(labelText: 'Komentar'),
               validator: (v) => Validators.textLength(v,
-                  min: 10, max: 1000, label: 'Komentar'),
+                  min: 10,
+                  max: 1000,
+                  label: 'Komentar',
+                  gender: LabelGender.masculine),
             ),
           ],
         ),

@@ -50,6 +50,29 @@ class ErrorView extends StatelessWidget {
   }
 }
 
+/// Wraps a Loading/Error/Empty state in a scrollable so a `RefreshIndicator`
+/// above it can still detect the pull gesture: those states are a plain
+/// `Center`, which doesn't scroll on its own, so pulling down on them would
+/// otherwise do nothing.
+class PullToRefreshFallback extends StatelessWidget {
+  const PullToRefreshFallback({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.7,
+          child: child,
+        ),
+      ],
+    );
+  }
+}
+
 class EmptyStateView extends StatelessWidget {
   const EmptyStateView({
     super.key,
