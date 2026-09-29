@@ -184,7 +184,15 @@ public sealed class SubscriptionService(
         };
         ApplyQuestionnaire(subscription.Questionnaire, questionnaire);
         db.Subscriptions.Add(subscription);
+
+        // Mentor se ponovo provjerava nad zaključanim profilom, u istoj transakciji sa upisom: istovremena promjena uloge mentora
+        // (AdminUserService) ili čeka ovaj upis i vidi pretplatu, ili je upisana prije pa se pretplata ne otvara.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockMentorProfileAsync(mentorProfileId, cancellationToken);
+        if (!await db.MentorProfiles.Visible().AnyAsync(x => x.Id == mentorProfileId, cancellationToken))
+            throw new NotFoundException(DomainTexts.MentorNotFound);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return await GetMineByIdAsync(clientUserId, subscription.Id, cancellationToken);
     }
 

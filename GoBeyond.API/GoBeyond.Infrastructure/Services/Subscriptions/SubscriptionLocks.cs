@@ -24,4 +24,18 @@ public static class SubscriptionLocks
         return await db.Subscriptions.Where(x => x.Id == subscriptionId)
             .ExecuteUpdateAsync(x => x.SetProperty(s => s.Status, s => s.Status), cancellationToken) > 0;
     }
+
+    /// <summary>
+    /// Zaključava mentorski profil do kraja tekuće transakcije (isti UPDATE bez promjene). Otvaranje nove pretplate kod mentora i
+    /// promjena uloge tog mentora ga zaključavaju, pa se izvršavaju jedno za drugim: promjena uloge vidi pretplatu otvorenu prije
+    /// nje (i odbija se), a pretplata otvorena poslije nje vidi da korisnik više nije mentor (i ne otvara se).
+    /// </summary>
+    public static async Task LockMentorProfileAsync(this GoBeyondDbContext db, int mentorProfileId, CancellationToken cancellationToken)
+    {
+        if (db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("Mentorski profil se zaključava samo unutar transakcije.");
+
+        await db.MentorProfiles.Where(x => x.Id == mentorProfileId)
+            .ExecuteUpdateAsync(x => x.SetProperty(m => m.Status, m => m.Status), cancellationToken);
+    }
 }

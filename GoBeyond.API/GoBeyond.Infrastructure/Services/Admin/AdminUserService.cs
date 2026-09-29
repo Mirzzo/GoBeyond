@@ -74,6 +74,11 @@ public sealed class AdminUserService(
             await accountValidator.ValidateClientAsync(errors, request.Client.FitnessLevelId, request.Client.FitnessGoalId,
                 request.Client.PreferredTrainingTypeId, "client.", cancellationToken);
 
+        // Mentorski profil je zaključan do kraja izmjene: pretplata koja se kod ovog mentora upravo otvara (SubscriptionService)
+        // se ili vidi u provjeri ispod, ili se nakon promjene uloge ne otvara.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (roleChanged && user.MentorProfile is not null)
+            await db.LockMentorProfileAsync(user.MentorProfile.Id, cancellationToken);
         if (roleChanged && await HasOpenCollaborationsAsync(user, cancellationToken))
             errors.Add("role", "Uloga se ne može promijeniti dok korisnik ima aktivne ili započete saradnje. Prvo ih otkažite.");
         errors.ThrowIfAny();
@@ -95,7 +100,6 @@ public sealed class AdminUserService(
             ProfileUpdater.ApplyClient(user.ClientProfile, request.Client);
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         if (roleChanged)
         {
             // Mentorski profil ostaje (vraćanjem uloge Mentor je ponovo vidljiv), ali dok uloga nije Mentor
