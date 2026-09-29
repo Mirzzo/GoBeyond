@@ -167,6 +167,18 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
 - Verifikacija E2E nalaza: 26 stvarnih mobile/backend bugova (2 major: detalj aktivne pretplate nedostupan), 5 duplikata, 1 nije bug (PlanUpdated throttle namjerno počinje objavom).
 - Runda 2 (u toku): B2R, D1R, E1R dorade + M1 (mobile, 26 nalaza, provjera na emulatoru) + B4 (NewMessage obavijesti, "Specijalizovan", lock kod auto-accepta, reminder race, zona za buduće mjesece, decimalni zarez).
 
+### Review popravki — runda 2 (glavni agent, prag > 8)
+| Grupa | Pre-review | Ocjena | Ishod |
+|---|---|---|---|
+| B2R auth/sigurnost (Opus) | 9 | **9/10** | PRIHVAĆENO — security stamp + `sid`: vlastita promjena lozinke zadržava sesiju uređaja pozivaoca (jedan 401 → refresh), ostale uređaje odjavljuje; refresh token vezan za stamp (napadač sa ukradenim tokenom 0/20, prije 5/20); invalidacija atomična; lock mentor profila protiv race-a promjene uloge; migracija `AddUserSecurityStamp`. 332 testa |
+| B4 backend ostatak (Opus) | 9 | **9/10** | PRIHVAĆENO — NewMessage naslov "Nova poruka: {ime}" + označavanje pročitanim pri otvaranju niti, rodno neutralni razlozi preporuke + "godine", lock pri auto-acceptu (400 umjesto 409), podsjetnici pod lockom, mjesec u zoni platforme, "39,99 USD" |
+| D1R desktop (Sonnet) | 8.5 | **8.5/10** | PRIHVAĆENO — mounted provjere u dijalozima, sekvenciranje pollinga obavijesti, USD labele, decimalna validacija kao backend, roles() greške, atomični commitovi. Glavni agent uklonio preostale reference na nalaze iz komentara |
+| E1R email-consumer (Sonnet) | 8 | **8/10** | DORADA (3.) — IDN normalizacija prije uklanjanja tačke, test kroz Worker, prozor između slanja i MarkSent, CRLF u QP dijelu, komentari |
+| M1 mobile (Sonnet) | 7.5 | **7.5/10** | DORADA — "Obimi je obavezni" (mora "su"), chat polling u pozadini (i označava pročitano), testovi koji ne čuvaju popravku (lokalizacija, DOB), test za zonu, raspored dugmadi na Pretplati, sitnice |
+- Master nakon spajanja: backend 373/373, desktop analyze čist + 76/76. Ugovor v1.7.
+- **Deploy:** korisnik je dozvolio rebuild (`.claude/settings.local.json`: samo `docker compose up -d --build`). API rebuildan, migracije `SubscriptionConsistency` i `AddUserSecurityStamp` primijenjene na bazu 210020 (korisnikov nalog i podaci netaknuti). Email-consumer se rebuilda nakon E1.
+- U toku: runda 3 (E1, M1) i regresijski retest backenda na glavnom stacku (3 testera, QA nalozi).
+
 ## Sljedeći koraci (korisnik)
 
 1. **Stripe ključevi za ocjenjivača:** ključevi su lokalno u `.env` (29.09.2026.), ali `.env` se ne commituje. Treba odlučiti kako ih ocjenjivač dobija (npr. `.env` u zip-u sa lozinkom, ili prema uputama za predaju).
