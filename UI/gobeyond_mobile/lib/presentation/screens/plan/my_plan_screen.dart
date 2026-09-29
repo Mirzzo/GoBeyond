@@ -278,7 +278,7 @@ class _PlanContent extends StatelessWidget {
                 Expanded(
                   child: Text(
                     !plan.canEdit
-                        ? 'Ovaj plan je samo za pregled — saradnja s mentorom je prekinuta.'
+                        ? 'Ovaj plan je samo za pregled — saradnja s mentorom je završena.'
                         : 'Plan je arhiviran. Mentor treba ponovo objaviti plan da biste mogli evidentirati treninge.',
                     style: const TextStyle(
                         color: AppTheme.textMuted, fontSize: 12.5),
@@ -416,7 +416,7 @@ class _PlanContent extends StatelessWidget {
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 !plan.canEdit
-                    ? 'Evidentiranje treninga nije dostupno jer je saradnja s mentorom prekinuta.'
+                    ? 'Saradnja je završena, pa se treninzi više ne mogu evidentirati.'
                     : 'Evidentiranje treninga je dostupno samo dok je plan objavljen.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),

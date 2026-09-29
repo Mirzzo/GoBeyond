@@ -71,10 +71,18 @@ void main() {
       matching: find.byType(ElevatedButton),
     ));
     expect(button.onPressed, isNull);
+    // canEdit is false for an expired as well as a cancelled collaboration,
+    // so the hints use the backend's status-neutral wording.
     expect(
-      find.textContaining('saradnja s mentorom prekinuta'),
+      find.text(
+          'Ovaj plan je samo za pregled — saradnja s mentorom je završena.'),
       findsOneWidget,
     );
+    expect(
+      find.text('Saradnja je završena, pa se treninzi više ne mogu evidentirati.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('prekinuta'), findsNothing);
   });
 
   testWidgets(
