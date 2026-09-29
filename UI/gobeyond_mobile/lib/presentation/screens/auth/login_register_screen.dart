@@ -167,8 +167,8 @@ class _LoginFormState extends State<_LoginForm> {
                     onPressed: () => setState(() => _obscure = !_obscure),
                   ),
                 ),
-                validator: (value) =>
-                    Validators.required(value, label: 'Lozinka'),
+                validator: (value) => Validators.required(value,
+                    label: 'Lozinka', gender: LabelGender.feminine),
               ),
               if (_errorMessage != null) ...[
                 const SizedBox(height: 12),

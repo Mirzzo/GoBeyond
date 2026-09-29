@@ -1,3 +1,29 @@
+/// Grammatical gender of a field label, used to agree the generated
+/// "required"/"length" message with it (Bosnian requires agreement: "Ime je
+/// obavezno" vs "Težina je obavezna" vs "Komentar je obavezan" vs "Obimi su
+/// obavezni"). [plural] is the masculine plural ("Obimi").
+enum LabelGender { masculine, feminine, neuter, plural }
+
+String _requiredWord(LabelGender gender) {
+  switch (gender) {
+    case LabelGender.masculine:
+      return 'obavezan';
+    case LabelGender.feminine:
+      return 'obavezna';
+    case LabelGender.neuter:
+      return 'obavezno';
+    case LabelGender.plural:
+      return 'obavezni';
+  }
+}
+
+// "je"/"su" and "mora"/"moraju" agree with the label's number.
+String _isWord(LabelGender gender) =>
+    gender == LabelGender.plural ? 'su' : 'je';
+
+String _mustWord(LabelGender gender) =>
+    gender == LabelGender.plural ? 'moraju' : 'mora';
+
 /// Shared client-side validation used across every form. All messages are
 /// Bosnian (ijekavica) and state the expected format/limits explicitly, per
 /// the course UI rules. Server-side `errors{field:[...]}` messages are
@@ -10,9 +36,13 @@ class Validators {
   static final _usernameRegex = RegExp(r'^[a-zA-Z0-9._]{3,30}$');
   static final _passwordRegex = RegExp(r'^(?=.*[A-Za-z])(?=.*\d).{8,64}$');
 
-  static String? required(String? value, {String label = 'Ovo polje'}) {
+  static String? required(
+    String? value, {
+    String label = 'Ovo polje',
+    LabelGender gender = LabelGender.neuter,
+  }) {
     if (value == null || value.trim().isEmpty) {
-      return '$label je obavezno.';
+      return '$label ${_isWord(gender)} ${_requiredWord(gender)}.';
     }
     return null;
   }
@@ -72,14 +102,15 @@ class Validators {
     required int max,
     String label = 'Polje',
     bool optional = false,
+    LabelGender gender = LabelGender.neuter,
   }) {
     final trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) {
       if (optional) return null;
-      return '$label je obavezno ($min–$max znakova).';
+      return '$label ${_isWord(gender)} ${_requiredWord(gender)} ($min–$max znakova).';
     }
     if (trimmed.length < min || trimmed.length > max) {
-      return '$label mora imati između $min i $max znakova.';
+      return '$label ${_mustWord(gender)} imati između $min i $max znakova.';
     }
     return null;
   }
@@ -90,17 +121,23 @@ class Validators {
     required num max,
     String label = 'Vrijednost',
     bool isInt = false,
+    LabelGender gender = LabelGender.neuter,
   }) {
     if (value == null || value.trim().isEmpty) {
-      return '$label je obavezno.';
+      return '$label ${_isWord(gender)} ${_requiredWord(gender)}.';
     }
     final parsed =
         isInt ? int.tryParse(value.trim()) : double.tryParse(value.trim());
+    final must = _mustWord(gender);
     if (parsed == null) {
-      return isInt ? '$label mora biti cijeli broj.' : '$label mora biti broj.';
+      final plural = gender == LabelGender.plural;
+      if (isInt) {
+        return '$label $must biti ${plural ? 'cijeli brojevi' : 'cijeli broj'}.';
+      }
+      return '$label $must biti ${plural ? 'brojevi' : 'broj'}.';
     }
     if (parsed < min || parsed > max) {
-      return '$label mora biti između $min i $max.';
+      return '$label $must biti između $min i $max.';
     }
     return null;
   }
