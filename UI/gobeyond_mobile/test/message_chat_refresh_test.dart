@@ -207,6 +207,71 @@ void main() {
     expect(find.text('Zdravo!'), findsOneWidget);
   });
 
+  testWidgets('a reload after a send that answers after a newer poll does '
+      "not drop the poll's newer message", (tester) async {
+    final repository = FakeMessageRepository()
+      ..messages = [_message(1, 'Dobar dan')];
+    await _pumpChat(tester, repository);
+    await tester.pumpAndSettle();
+
+    repository.manualResponses = true;
+    await _send(tester, 'Zdravo!'); // reload after send -> pending[0]
+    await tester.pump(const Duration(seconds: 10)); // poll -> pending[1]
+    expect(repository.getThreadMessagesCalls, 3);
+
+    repository.resolveResponse(1, [
+      _message(1, 'Dobar dan'),
+      _message(2, 'Zdravo!', isMine: true),
+      _message(3, 'Odgovor mentora'),
+    ]);
+    await _settle(tester);
+    expect(find.text('Odgovor mentora'), findsOneWidget);
+
+    // The reload started first and answers last, without the reply.
+    repository.resolveResponse(
+        0, [_message(1, 'Dobar dan'), _message(2, 'Zdravo!', isMine: true)]);
+    await _settle(tester);
+    expect(find.text('Odgovor mentora'), findsOneWidget);
+    expect(find.text('Zdravo!'), findsOneWidget);
+  });
+
+  testWidgets('a reload after a send that fails after a newer poll '
+      'succeeded keeps the messages instead of the error view',
+      (tester) async {
+    final repository = FakeMessageRepository()
+      ..messages = [_message(1, 'Dobar dan')];
+    await _pumpChat(tester, repository);
+    await tester.pumpAndSettle();
+
+    repository.manualResponses = true;
+    await _send(tester, 'Zdravo!'); // reload after send -> pending[0]
+    await tester.pump(const Duration(seconds: 10)); // poll -> pending[1]
+
+    repository.resolveResponse(
+        1, [_message(1, 'Dobar dan'), _message(2, 'Zdravo!', isMine: true)]);
+    await _settle(tester);
+
+    repository.failResponse(0, ApiException('Mreža nije dostupna.'));
+    await _settle(tester);
+    expect(find.byType(ErrorView), findsNothing);
+    expect(find.text('Mreža nije dostupna.'), findsNothing);
+    expect(find.text('Zdravo!'), findsOneWidget);
+  });
+
+  testWidgets('no poll is sent while the first load is still running or '
+      'after it failed', (tester) async {
+    final repository = FakeMessageRepository()..manualResponses = true;
+    await _pumpChat(tester, repository); // first load -> pending[0]
+    await tester.pump(const Duration(seconds: 25));
+    expect(repository.getThreadMessagesCalls, 1);
+
+    repository.failResponse(0, ApiException('Mreža nije dostupna.'));
+    await _settle(tester);
+    expect(find.byType(ErrorView), findsOneWidget);
+    await tester.pump(const Duration(seconds: 25));
+    expect(repository.getThreadMessagesCalls, 1);
+  });
+
   testWidgets('reloading after a send keeps the messages on screen instead '
       'of the loading view', (tester) async {
     final repository = FakeMessageRepository()
