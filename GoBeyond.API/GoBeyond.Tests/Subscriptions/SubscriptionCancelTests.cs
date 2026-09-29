@@ -32,7 +32,7 @@ public sealed class SubscriptionCancelTests : IDisposable
         var client = Assert.Single(await _db.NotificationsAsync(_db.ClientUser.Id));
         Assert.Equal(NotificationType.SubscriptionCancelled, client.Type);
         Assert.Equal("Saradnja sa mentorom Selma Delić je prekinuta. Razlog: Mentor ne odgovara na zahtjev. " +
-                     "Uplaćeni iznos od 27.50 USD biće vraćen na vašu karticu.", client.Body);
+                     "Uplaćeni iznos od 27,50 USD biće vraćen na vašu karticu.", client.Body);
         Assert.Contains(await _db.NotificationsAsync(_db.MentorUser.Id), x => x.Type == NotificationType.SubscriptionCancelled);
     }
 

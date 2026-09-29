@@ -68,6 +68,10 @@ public static class DomainTexts
         return TimeZoneInfo.ConvertTimeFromUtc(utc, PlatformTimeZone(timeZoneId));
     }
 
+    /// <summary>Iznos sa decimalnim zarezom, npr. "39,99 USD" (kao u aplikacijama i demo podacima).</summary>
+    public static string Money(decimal amount, string currency) =>
+        $"{amount.ToString("0.00", CultureInfo.InvariantCulture).Replace('.', ',')} {currency.ToUpperInvariant()}";
+
     /// <summary>Broj godina sa ispravnim oblikom: "1 godina", "2 godine", "5 godina", "21 godina", "22 godine", "112 godina".</summary>
     public static string Years(int count) =>
         $"{count} {(count % 10 is >= 2 and <= 4 && count % 100 is < 12 or > 14 ? "godine" : "godina")}";

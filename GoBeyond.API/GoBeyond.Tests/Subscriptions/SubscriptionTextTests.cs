@@ -67,7 +67,7 @@ public sealed class SubscriptionTextTests
 
         var client = _notifications.Sent.Single(x => x.UserId == 11);
         var mentor = _notifications.Sent.Single(x => x.UserId == 22);
-        Assert.Equal("Uplata od 29.99 USD je uspješna. Saradnja sa mentorom Selma Delić traje do 29.11.2026.", client.Body);
+        Assert.Equal("Uplata od 29,99 USD je uspješna. Saradnja sa mentorom Selma Delić traje do 29.11.2026.", client.Body);
         Assert.Equal("Pretplata je produžena", mentor.Title);
         Assert.Equal("Saradnja sa klijentom Nađa Škrijelj je produžena do 29.11.2026.", mentor.Body);
         AssertCleanTexts();
@@ -117,7 +117,7 @@ public sealed class SubscriptionTextTests
 
         var rejected = Assert.Single(_notifications.Sent);
         Assert.Equal("Vaš zahtjev za saradnju sa mentorom Selma Delić je odbijen. Razlog: Trenutno nemam slobodnih termina. " +
-                     "Uplaćeni iznos od 27.50 USD biće vraćen na vašu karticu.", rejected.Body);
+                     "Uplaćeni iznos od 27,50 USD biće vraćen na vašu karticu.", rejected.Body);
         AssertCleanTexts();
     }
 

@@ -24,7 +24,7 @@ public sealed class UserDeletionSubscriptionTests
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         var clientNotification = Assert.Single(Notifications(factory, TestUsers.Client));
         Assert.Equal("Saradnja sa mentorom Test mentor.a je prekinuta. Razlog: Mentor je uklonjen sa platforme. " +
-                     "Uplaćeni iznos od 20.00 USD biće vraćen na vašu karticu.", clientNotification.Body);
+                     "Uplaćeni iznos od 20,00 USD biće vraćen na vašu karticu.", clientNotification.Body);
         Assert.Equal(PaymentStatus.Refunded, factory.Query(db => db.Payments.AsNoTracking().Single(x => x.SubscriptionId == subscriptionId)).Status);
     }
 

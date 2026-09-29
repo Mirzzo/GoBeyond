@@ -1,4 +1,3 @@
-using System.Globalization;
 using GoBeyond.Core.Entities;
 using GoBeyond.Core.Enums;
 using GoBeyond.Core.Exceptions;
@@ -376,6 +375,5 @@ public sealed class SubscriptionWorkflow(
     private static string RefundSentence(decimal refunded, string currency) =>
         refunded > 0 ? $" Uplaćeni iznos od {Money(refunded, currency)} biće vraćen na vašu karticu." : string.Empty;
 
-    private static string Money(decimal amount, string currency) =>
-        $"{amount.ToString("0.00", CultureInfo.InvariantCulture)} {currency.ToUpperInvariant()}";
+    private static string Money(decimal amount, string currency) => DomainTexts.Money(amount, currency);
 }
