@@ -15,7 +15,7 @@ Verzija 1 (27.09.2026). Backend implementira tačno ovaj ugovor. Ako backend mor
   - `500` vraća `{ "message": "Došlo je do greške na serveru. Pokušajte ponovo." }`.
 - Sve poruke koje backend vraća su na **bosanskom (ijekavica)** i konkretne (npr. "Korisničko ime je već zauzeto.").
 - Slobodni tekst (razlozi odbijanja/otkazivanja, upitnik, opisi dana plana, motivacijska poruka, unosi napretka, komentar recenzije, naslov i sadržaj obavijesti, biografija, poruka) se trimuje **prije** provjere dužine: tekst dopunjen razmacima do minimuma vraća `400`.
-- Datumi u tekstovima obavijesti i emailova su u vremenskoj zoni platforme (`Lifecycle:TimeZoneId`, podrazumijevano Europe/Sarajevo), u formatu `dd.MM.yyyy.`.
+- Datumi u tekstovima obavijesti i emailova su u vremenskoj zoni platforme (`Lifecycle:TimeZoneId`, podrazumijevano Europe/Sarajevo), u formatu `dd.MM.yyyy.`. Iznosi imaju decimalni zarez i valutu velikim slovima, npr. `39,99 USD`.
 - Uloge: `Admin`, `Mentor`, `Client`. Politike: `AdminOnly`, `MentorOnly`, `ClientOnly`, `MentorOrAdmin`.
 
 ## 1. Model podataka (finalni)
@@ -54,7 +54,7 @@ Domenske tabele:
 | POST | `/api/auth/register/mentor` | anon | `multipart/form-data`: polja `firstName, lastName, username, email, phoneNumber?, dateOfBirth, genderId, password, confirmPassword, trainingTypeId, nickname?, bio, yearsOfExperience, monthlyPrice, specializationIds` (ponovljeno polje) + `certificates` (1–5 fajlova, pdf/jpg/jpeg/png, ≤5 MB). Odgovor: `{ "message": "Registracija je uspješna. Vaš nalog čeka odobrenje administratora." }` |
 | POST | `/api/auth/refresh` | anon | `{ refreshToken }` → `AuthResponse` |
 | POST | `/api/auth/logout` | auth | `{ refreshToken }` → 204 |
-| POST | `/api/auth/change-password` | auth | `{ currentPassword, newPassword, confirmPassword }` → `{ message: "Lozinka je uspješno promijenjena." }` |
+| POST | `/api/auth/change-password` | auth | `{ currentPassword, newPassword, confirmPassword }` → `{ message: "Lozinka je uspješno promijenjena." }`. Završava sesije na svim drugim uređajima (njihovi access i refresh tokeni odmah dobijaju `401`). Uređaj koji je promijenio lozinku ostaje prijavljen: njegov trenutni access token dobija `401`, a `POST /api/auth/refresh` sa njegovim refresh tokenom vraća nove tokene. |
 
 Pravila lozinke: 8–64 znaka, bar jedno slovo i jedan broj. Poruka: "Lozinka mora imati 8–64 znaka, uključujući barem jedno slovo i jedan broj." Seed nalozi s lozinkom `test` su izuzetak jer ne prolaze kroz registraciju.
 
@@ -93,11 +93,11 @@ Korisnici:
 - `GET /api/admin/users/{id}` → `AdminUserDetail = AdminUser + { dateOfBirth, genderId, mentor?, client? }` (isti pod-objekti kao `UserProfile`).
 - `PUT /api/admin/users/{id}` → `{ firstName, lastName, username, email, phoneNumber?, dateOfBirth, genderId, role, mentor?, client? }`. Promjena uloge u Mentor ili Client zahtijeva odgovarajući pod-objekat ako profil ne postoji (inače 400 s jasnom porukom). Lozinka se ne traži. Odgovor: `AdminUserDetail`.
 - `PUT /api/admin/users/{id}/reset-password` → `{ newPassword, confirmPassword }` → `{ message }`.
-- `PUT /api/admin/users/{id}/block` / `.../unblock` → `AdminUser`. Blokiranje opoziva refresh tokene.
+- `PUT /api/admin/users/{id}/block` / `.../unblock` → `AdminUser`. Blokiranje završava sve sesije korisnika (access tokeni odmah `401`, refresh tokeni opozvani); nakon odblokiranja je potrebna nova prijava.
 - `DELETE /api/admin/users/{id}` → 204. Soft delete: `isDeleted = true`, `isActive = false`, tokeni se opozivaju, a unblock ne može vratiti obrisanog korisnika. Za mentora se sve pretplate AwaitingMentor/Active prekidaju (Cancelled, `statusReason` "Mentor je uklonjen sa platforme.") i klijenti dobijaju obavijest. Njihovi planovi ostaju vidljivi klijentima (read-only) i više se ne mogu uređivati ni obnavljati.
 
 Mentori i zahtjevi:
-- `GET /api/admin/mentors?search=&trainingTypeId=&isActive=` → `[AdminMentor]`, gdje je `AdminMentor = { userId, mentorProfileId, fullName, nickname, username, email, profileImageUrl, trainingTypeName, monthlyPrice, averageRating, reviewCount, activeSubscribers, isActive }` (samo Approved).
+- `GET /api/admin/mentors?search=&trainingTypeId=&isActive=` → `[AdminMentor]`, gdje je `AdminMentor = { userId, mentorProfileId, fullName, nickname, username, email, profileImageUrl, trainingTypeName, monthlyPrice, averageRating, reviewCount, activeSubscribers, isActive }` (samo Approved mentori čiji korisnik ima ulogu Mentor).
 - `GET /api/admin/mentor-requests?search=&trainingTypeId=` → `[MentorRequest]` (Pending), gdje je `MentorRequest = { mentorProfileId, userId, fullName, email, trainingTypeName, yearsOfExperience, requestedAt, certificateCount }`.
 - `GET /api/admin/mentor-requests/{mentorProfileId}` → `MentorRequestDetail = MentorRequest + { nickname, bio, dateOfBirth, age, phoneNumber, monthlyPrice, specializationNames, profileImageUrl, certificates: [Certificate] }`, gdje je `Certificate = { id, fileName, fileUrl, uploadedAt, isVerified }`, a `fileUrl` je uvijek `/api/certificates/{id}/file`.
 - `PUT /api/admin/mentor-requests/{mentorProfileId}/approve` → `{ message }`. Obavještava mentora (in-app + email).
@@ -151,7 +151,7 @@ Planovi (`/api/training-plans`):
                  days: [{ id, dayOfWeek, dayName, trainingDurationMinutes, trainingDescription, nutritionDurationMinutes, nutritionDescription }] }
   ```
   `dayName` je na bosanskom (Ponedjeljak…Nedjelja). `days` sadrži samo popunjene dane.
-- `POST /api/training-plans` (MentorOnly) → `{ subscriptionId, motivationalQuote? }` → `PlanDetail` (Draft). 409 ako plan za pretplatu već postoji. Pretplata mora biti Active; ako je AwaitingMentor, backend je prvo automatski prihvati (IZRADI PLAN = prihvatanje).
+- `POST /api/training-plans` (MentorOnly) → `{ subscriptionId, motivationalQuote? }` → `PlanDetail` (Draft). 409 ako plan za pretplatu već postoji. Pretplata mora biti Active; ako je AwaitingMentor, backend je prvo automatski prihvati (IZRADI PLAN = prihvatanje). Kreiranje zaključava pretplatu kao i ostali prelazi statusa: ako je zahtjev istovremeno odbijen ili otkazan, kreiranje vraća `400` "Plan se može kreirati samo za aktivnu saradnju." (ne `409`).
 - `PUT /api/training-plans/{id}` (MentorOnly) → `{ motivationalQuote? }` → `PlanDetail`.
 - `PUT /api/training-plans/{id}/days/{dayOfWeek}` (MentorOnly) → `{ trainingDurationMinutes, trainingDescription, nutritionDurationMinutes?, nutritionDescription }` → `PlanDetail`. Ako je plan Published, `version++` i klijent dobija obavijest PlanUpdated (najviše jedna obavijest u 10 minuta po planu).
 - `DELETE /api/training-plans/{id}/days/{dayOfWeek}` (MentorOnly, samo Draft) → `PlanDetail`.
@@ -163,7 +163,7 @@ Planovi (`/api/training-plans`):
 ## 7. Klijent (ClientOnly, osim gdje piše anon)
 
 Mentori i preporuke:
-- `GET /api/mentors?trainingTypeId=&search=&sortBy=rating|name|price&sortDirection=asc|desc` (anon) → `[MentorSummary]`, gdje je `MentorSummary = { mentorProfileId, fullName, nickname, profileImageUrl, trainingTypeId, trainingTypeName, averageRating, reviewCount, monthlyPrice, currency, yearsOfExperience, age }`. Vraća samo Approved, aktivne i neobrisane mentore.
+- `GET /api/mentors?trainingTypeId=&search=&sortBy=rating|name|price&sortDirection=asc|desc` (anon) → `[MentorSummary]`, gdje je `MentorSummary = { mentorProfileId, fullName, nickname, profileImageUrl, trainingTypeId, trainingTypeName, averageRating, reviewCount, monthlyPrice, currency, yearsOfExperience, age }`. Vraća samo Approved, aktivne i neobrisane mentore čiji korisnik ima ulogu Mentor.
 - `GET /api/mentors/{mentorProfileId}` (anon) → `MentorDetail = MentorSummary + { bio, specializationNames, reviews: [Review] (zadnjih 10) }`.
 - `GET /api/mentors/{mentorProfileId}/reviews` (anon) → `[Review]`, gdje je `Review = { id, clientFullName, clientPhotoUrl, rating, comment, createdAt, isMine }`.
 - `GET /api/mentors/{mentorProfileId}/similar?take=3` (anon) → `[MentorSummary]` (content-based sličnost mentor↔mentor).
@@ -185,10 +185,10 @@ Plan i treninzi:
 - `GET /api/training-plans/{planId}/sessions` (klijent vlasnik ili mentor vlasnik) → `[TrainingSessionItem]`, gdje je `TrainingSessionItem = { id, dayOfWeek, dayName, completedAt, repetitions, note }`.
 
 Napredak (historija treninga):
-- `GET /api/progress/years` → `[int]` (godine sa unosima + tekuća godina).
+- `GET /api/progress/years` → `[int]` (godine sa unosima + tekuća godina u vremenskoj zoni platforme).
 - `GET /api/progress?year=` → `[ProgressEntryItem]`, gdje je `ProgressEntryItem = { id, year, month, monthName, photoUrl, weightKg, measurements, strength, conditioning, hasPlanSnapshot, createdAt, updatedAt }`.
 - `GET /api/progress/{year}/{month}` → `ProgressEntryItem` ili 404.
-- `PUT /api/progress/{year}/{month}` → `{ weightKg, measurements, strength, conditioning }` → `ProgressEntryItem` (upsert). Pri kreiranju se snima JSON snapshot trenutnog plana, ali samo za unos tekućeg mjeseca; za prošle mjesece snapshot ostaje prazan i `GET .../plan` vraća `404`. Budući mjesec vraća 400.
+- `PUT /api/progress/{year}/{month}` → `{ weightKg, measurements, strength, conditioning }` → `ProgressEntryItem` (upsert). Pri kreiranju se snima JSON snapshot trenutnog plana, ali samo za unos tekućeg mjeseca; za prošle mjesece snapshot ostaje prazan i `GET .../plan` vraća `404`. Tekući i budući mjesec se računaju u vremenskoj zoni platforme (`Lifecycle:TimeZoneId`); budući mjesec vraća `400` "Nije moguće unijeti napredak za budući mjesec.".
 - `POST /api/progress/{year}/{month}/photo` (multipart `file`) → `ProgressEntryItem`. Unos mora postojati.
 - `GET /api/progress/{year}/{month}/plan` → `PlanDetail` iz snapshota ("HISTORIJA PLANA") ili 404.
 - `GET /api/progress/chart` → `[{ year, month, weightKg }]` za grafikon.
@@ -202,7 +202,7 @@ Recenzije:
 - Notifikacije: `GET /api/notifications?unreadOnly=&search=` → `[{ id, title, body, type, isRead, createdAt }]`. `PUT /api/notifications/{id}/read`, `PUT /api/notifications/read-all`, `GET /api/notifications/unread-count` → `{ count }`.
 - Poruke:
   - `GET /api/messages/threads?search=` → `[{ subscriptionId, otherPartyName, otherPartyPhotoUrl, lastMessage, lastMessageAt, unreadCount, canSend }]`. Mentor vidi pretplate AwaitingMentor/Active/Expired/Cancelled koje je klijent platio (`paidAt` postavljen), klijent svoje.
-  - `GET /api/messages/threads/{subscriptionId}` → `[{ id, content, sentAt, isMine, senderName }]` i označava tuđe poruke pročitanim.
+  - `GET /api/messages/threads/{subscriptionId}` → `[{ id, content, sentAt, isMine, senderName }]` i označava tuđe poruke pročitanim, kao i čitaočevu nepročitanu NewMessage obavijest od druge strane (osim ako druga nit sa istom osobom još ima nepročitanih poruka).
   - `POST /api/messages/threads/{subscriptionId}` → `{ content }` → poruka. Dozvoljeno dok je pretplata AwaitingMentor ili Active. Druga strana dobija NewMessage notifikaciju (in-app).
 - Aktivnost: `POST /api/activity/heartbeat` → 204. Desktop i mobile ga zovu svakih 60 s dok je aplikacija aktivna i korisnik prijavljen. Backend dodaje najviše 90 s po pozivu u `UserActivity`.
 
@@ -213,8 +213,9 @@ Recenzije:
 - `SubscriptionLifecycleService` (hosted service u API-ju, interval iz konfiguracije) radi sljedeće:
   - Prvo usklađuje nepotvrđene Stripe uplate (Pending i Failed, starije od 5 min, mlađe od 48 h): naplaćene primjenjuje ili automatski vraća, otkazane označava `Failed`, a plativ PaymentIntent koji se više ne smije platiti (zamijenjen, ili pretplata više ne prima uplatu) otkazuje na Stripe-u. Kad Stripe nije dostupan (prekid veze ili timeout), preostale uplate se provjeravaju u sljedećem ciklusu; greška nikad ne gasi API.
   - Active pretplate s prošlim `endDate` prebacuje u Expired i obavještava klijenta i mentora ("istek saradnje"). Prije isteka na Stripe-u provjerava nepotvrđena produženja (bez obzira na starost): produženje plaćeno prije isteka produžava pretplatu od starog `endDate`, a neplaćeno se otkazuje.
-  - Klijentu šalje SubscriptionExpiring 3 dana prije isteka (jednom).
+  - Klijentu šalje SubscriptionExpiring 3 dana prije isteka (jednom po periodu; produženje ga resetuje).
   - Mentoru šalje PlanMissing ako je pretplata Active duže od 48 h bez objavljenog plana (najviše jednom dnevno, "izostanak plana").
+  - Podsjetnici se šalju za svaku pretplatu posebno, nad zaključanom pretplatom: produženje ili otkazivanje u istom trenutku ne dobija zastario podsjetnik, a greška jedne pretplate ne zaustavlja ostale.
   - Klijentu šalje Inactivity nakon 7 dana bez heartbeat-a (najviše jednom sedmično, "neaktivnost").
 
 ## 10. Seed (demo) podaci
@@ -248,7 +249,7 @@ Dodatno:
   - **Admin:** administrator ne može blokirati, obrisati ni promijeniti ulogu vlastitog naloga (`400`). Promjena uloge nije dozvoljena dok korisnik ima PendingPayment/AwaitingMentor/Active saradnju (`400`, `errors.role`). Mentor kojeg admin kreira promjenom uloge je odmah Approved. `GET /api/admin/mentor-requests/{id}` radi za svakog neobrisanog mentora (i odobrenog, radi pregleda certifikata); approve/reject rade samo za Pending (`400` "Ovaj zahtjev je već obrađen."). Brisanje mentora: AwaitingMentor/Active/PendingPayment pretplate prelaze u Cancelled ("Mentor je uklonjen sa platforme."), uplate za neprihvaćene zahtjeve (AwaitingMentor) se vraćaju, klijent dobija obavijest i `GET /api/training-plans/my-current` mu i dalje vraća plan (`canEdit=false`). Brisanje klijenta otkazuje njegove otvorene pretplate i obavještava mentora.
   - **Planovi (State Machine):** Draft dozvoljava izmjenu i brisanje dana i objavu (7 dana); Published dozvoljava izmjenu dana i motivacijske poruke (svaka izmjena `version++`, PlanUpdated najviše jednom u 10 min) i arhiviranje; Archived dozvoljava izmjenu dana i ponovnu objavu (`version++`, obavijest PlanPublished). Nedozvoljeno: `400` "Akcija \"...\" nije dozvoljena za plan u statusu \"...\"". Klijent ne vidi Draft plan (`403`).
   - **Mentor:** `GET /api/mentors/me/subscribers` bez `status` filtera ne vraća PendingPayment i Rejected. Zadnji certifikat se ne može obrisati (`400`).
-  - **Poruke:** admin dobija prazan niz za `threads` i `403` za pojedinačnu nit. Druga strana ima najviše jednu nepročitanu NewMessage obavijest po pošiljaocu (ažurira se zadnjom porukom).
+  - **Poruke:** admin dobija prazan niz za `threads` i `403` za pojedinačnu nit. Druga strana ima najviše jednu nepročitanu NewMessage obavijest po pošiljaocu, sa naslovom `Nova poruka: {ime i prezime}` i zadnjom porukom kao tekstom.
   - **Plaćanja:** povrat kod odbijanja zahtjeva ide preko Stripe Refund API-ja; seed uplate (`seed_pi_...`, nikad naplaćene preko Stripe-a) samo se označavaju kao Refunded. Webhook bez podešenog `Payments__WebhookSecret` ili sa neispravnim potpisom vraća `400`.
   - **Heartbeat:** pauza duža od 180 s tretira se kao nova sesija (pripisuje se 0 s).
   - **Emailovi (outbox → RabbitMQ → EmailConsumer → Mailpit)** šalju se i za registraciju klijenta ("Dobrodošli na GoBeyond") i mentora ("Registracija je primljena"), pored obavijesti iz ugovora.
@@ -292,3 +293,15 @@ Dodatno:
   - **Validacija:** slobodni tekst se trimuje prije provjere dužine; `mentor.monthlyPrice` smije imati najviše dvije decimale (`400` "Mjesečna cijena može imati najviše dvije decimale.").
   - **Treninzi** se mogu evidentirati samo dok je saradnja aktivna; **snapshot plana** uz unos napretka samo za tekući mjesec.
   - Nove postavke: `Payments:RequestTimeoutSeconds` (30), `Lifecycle:TimeZoneId` ("Europe/Sarajevo"), `Lifecycle:StartupDelaySeconds` (20).
+- v1.7 — ispravke nakon testiranja (runda 2). Rute i tijela su nepromijenjeni:
+  - **Security stamp i sesije:** access token nosi tvrdnje `stamp` i `sid`. Admin reset lozinke, blokiranje, brisanje, promjena uloge i vlastita promjena lozinke mijenjaju stamp: raniji access tokeni odmah dobijaju `401` "Sesija više nije važeća. Prijavite se ponovo." i ne oživljavaju nakon odblokiranja ili vraćanja uloge. Token izdat prije v1.7 (bez `stamp`) dobija jedan `401`, a aplikacija ga obnovi refresh-om (migracija `AddUserSecurityStamp`).
+  - **Refresh token** važi samo uz stamp sa kojim je izdat i rotira se atomski: od više istovremenih `POST /api/auth/refresh` sa istim tokenom uspijeva tačno jedan.
+  - **Vlastita promjena lozinke** završava sesije na drugim uređajima, a uređaj koji je promijenio lozinku ostaje prijavljen.
+  - Istovremena registracija, admin izmjena korisnika ili izmjena vlastitog profila sa istim korisničkim imenom ili emailom vraća `400` (`errors.username`/`errors.email`), nikad `500`.
+  - Istekao token: `401` "Niste prijavljeni ili je sesija istekla. Prijavite se ponovo."; klijent koji traži certifikat: `403` "Nemate pristup ovom certifikatu.".
+  - Parametri pretrage `search`/`name` se skraćuju na 100 znakova.
+  - **Mentorski profil** je vidljiv i dostupan za novu saradnju samo dok korisnik ima ulogu Mentor; promjena uloge nije dozvoljena dok postoji otvorena saradnja (`400` `errors.role`), ni kad se pretplata otvara u istom trenutku.
+  - **NewMessage obavijest:** naslov `Nova poruka: {ime i prezime}`; otvaranje niti je označava pročitanom.
+  - **Razlozi preporuke** su rodno neutralni ("Specijalizacija: {cilj}") sa ispravnim oblikom godina ("22 godine iskustva").
+  - **Kreiranje plana** i **podsjetnici** rade nad zaključanom pretplatom; **napredak** računa tekući mjesec u zoni platforme; **iznosi** u tekstovima sa decimalnim zarezom.
+  - Poruke administratoru: "Mentorski nalog ({ime i prezime}) je odobren." i "Zahtjev za mentorski nalog ({ime i prezime}) je odbijen."
