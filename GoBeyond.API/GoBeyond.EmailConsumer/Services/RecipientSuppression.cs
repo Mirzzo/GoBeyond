@@ -1,3 +1,5 @@
+using System.Net.Mail;
+
 namespace GoBeyond.EmailConsumer.Services;
 
 /// <summary>
@@ -18,12 +20,28 @@ public static class RecipientSuppression
     public static bool IsMailpitHost(string? host) =>
         !string.IsNullOrWhiteSpace(host) && MailpitHosts.Contains(host.Trim(), StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Domena primaoca (dio iza zadnjeg '@'), ili null ako adresa nema domenu.</summary>
+    /// <summary>
+    /// Domena primaoca, ili null ako adresa nema domenu. Parsira preko <see cref="MailAddress"/> - ISTI
+    /// parser koji <see cref="SmtpEmailSender"/> stvarno koristi za slanje (<c>MailMessage.To.Add</c>) - da bi
+    /// supresija gledala TAČNO onu domenu na koju bi email stvarno otišao, ne sirovi queue string. Bez ovoga
+    /// (review defekt) oblici koje MailAddress normalizuje - zavšna tačka ("x@gobeyond.ba."), uglaste zagrade
+    /// ("&lt;x@gobeyond.ba&gt;") ili komentar ("x@gobeyond.ba(napomena)") - bi prošli mimo supresije iako bi se
+    /// email stvarno poslao na "gobeyond.ba", jer bi sirovo dijeljenje po '@' vratilo drugačiji string.
+    /// TrimEnd('.') pokriva slučaj kad MailAddress zadrži završnu tačku u Host-u.
+    /// </summary>
     public static string? ExtractDomain(string? email)
     {
         if (string.IsNullOrWhiteSpace(email)) return null;
+        if (MailAddress.TryCreate(email.Trim(), out var address))
+        {
+            var host = address.Host.Trim().TrimEnd('.');
+            return host.Length > 0 ? host : null;
+        }
+
+        // MailAddress odbija adresu koju smatra neispravnom (npr. "not-an-email", bez '@'); u tom slučaju
+        // nema domene na koju bi se uopšte moglo poslati, pa se tretira isto kao i prije - bez supresije.
         var at = email.LastIndexOf('@');
-        return at >= 0 && at < email.Length - 1 ? email[(at + 1)..].Trim() : null;
+        return at >= 0 && at < email.Length - 1 ? email[(at + 1)..].Trim().TrimEnd('.') : null;
     }
 
     /// <summary>

@@ -54,6 +54,34 @@ public class RecipientSuppressionTests
         Assert.False(RecipientSuppression.ShouldSuppress("smtp.gmail.com", "x@notgobeyond.ba", SuppressedDomains));
     }
 
+    // Review defect: ExtractDomain used to split the raw string on '@', while SmtpEmailSender actually sends
+    // through System.Net.Mail.MailAddress, which normalizes these forms. A trailing dot, angle brackets or a
+    // comment all slipped past suppression (even for the exact base domain) although the mail really went out
+    // to the clean, protected address. ExtractDomain now parses through MailAddress (the same parser the
+    // sender uses) so suppression sees the SAME host the email would really be sent to.
+    [Theory]
+    [InlineData("x@gobeyond.ba.")] // trailing dot on the exact base domain
+    [InlineData("x@edu.gobeyond.ba.")] // trailing dot on a subdomain
+    [InlineData("<x@gobeyond.ba>")] // angle-address form, base domain
+    [InlineData("<x@edu.gobeyond.ba>")] // angle-address form, subdomain
+    [InlineData("x@edu.gobeyond.ba(note)")] // RFC 5322 comment form
+    public void ShouldSuppress_SuppressesAddressFormsThatMailAddressNormalizesToAProtectedDomain_WhenHostIsRealSmtp(string recipient)
+    {
+        Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
+    }
+
+    [Fact]
+    public void ExtractDomain_TrimsTrailingDot()
+    {
+        Assert.Equal("gobeyond.ba", RecipientSuppression.ExtractDomain("x@gobeyond.ba."));
+    }
+
+    [Fact]
+    public void ExtractDomain_ParsesAngleAddressForm()
+    {
+        Assert.Equal("edu.gobeyond.ba", RecipientSuppression.ExtractDomain("<x@edu.gobeyond.ba>"));
+    }
+
     [Fact]
     public void ShouldSuppress_ReturnsFalse_WhenNoDomainsConfigured()
     {
