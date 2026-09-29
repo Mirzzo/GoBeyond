@@ -121,6 +121,47 @@ void main() {
     expect(observer.events, ['push']);
   });
 
+  testWidgets('a similar-mentor card for the mentor already shown does not '
+      'open that mentor again', (tester) async {
+    await useTallSurface(tester);
+    final mentorRepository = FakeMentorRepository()
+      ..mentorsById = {1: _detail(1, 'Dino Prvi')}
+      ..similarMentors = [
+        MentorSummary.fromJson({
+          'mentorProfileId': 1,
+          'fullName': 'Dino Prvi',
+          'trainingTypeId': 1,
+          'trainingTypeName': 'Weightlifting',
+          'averageRating': 4.5,
+          'reviewCount': 10,
+          'monthlyPrice': 19.99,
+          'currency': 'USD',
+          'yearsOfExperience': 5,
+          'age': 30,
+        }),
+      ];
+    final observer = _RecordingNavigatorObserver();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.theme,
+        navigatorObservers: [observer],
+        home: MentorDetailScreen(
+          mentorProfileId: 1,
+          mentorRepository: mentorRepository,
+          subscriptionRepository: FakeSubscriptionRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    observer.events.clear();
+
+    // As above, no frame is pumped after the tap.
+    await tester.tap(find.text('Dino Prvi'));
+
+    expect(observer.events, isEmpty);
+  });
+
   testWidgets('review count uses the Bosnian plural form', (tester) async {
     await useTallSurface(tester);
     final mentorRepository = FakeMentorRepository()
