@@ -143,7 +143,11 @@ public sealed class Worker(
         };
     }
 
-    private async Task HandleAsync(IChannel channel, BasicDeliverEventArgs delivery, RabbitMqOptions settings, CancellationToken stoppingToken)
+    /// <summary>
+    /// Obrađuje jednu isporuku: validacija, supresija, slanje kroz <see cref="InFlightSendGate"/> (sa provjerom
+    /// <see cref="SentMessageIdStore"/>) i ack/retry/dead-letter. Public radi testova (WorkerHandleAsyncTests).
+    /// </summary>
+    public async Task HandleAsync(IChannel channel, BasicDeliverEventArgs delivery, RabbitMqOptions settings, CancellationToken stoppingToken)
     {
         var attempt = ReadAttempt(delivery.BasicProperties) + 1;
         EmailNotificationMessage? message;

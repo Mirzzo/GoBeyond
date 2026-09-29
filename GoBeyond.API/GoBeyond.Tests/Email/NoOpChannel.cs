@@ -4,15 +4,20 @@ using RabbitMQ.Client.Events;
 namespace GoBeyond.Tests.Email;
 
 /// <summary>
-/// Minimalan <see cref="IChannel"/> "stub" korišten SAMO da se napravi pravi <see cref="AsyncEventingBasicConsumer"/>
-/// u WorkerConsumerLoopTests (konstruktor zahtijeva IChannel, ali ga ne poziva pri konstrukciji). Svaki član
-/// baca ili vraća bezopasnu podrazumijevanu vrijednost jer testovi NIKAD ne izvode pravu operaciju preko
-/// kanala - zovu direktno consumer-ove Handle*Async metode (HandleBasicCancelAsync / HandleChannelShutdownAsync),
-/// iste metode koje RabbitMQ.Client-ova dispatch petlja zove kad broker otkaže consumer-a (npr. obrisan queue)
-/// ili kanal/konekcija padne.
+/// Minimalan <see cref="IChannel"/> "stub": za pravi <see cref="AsyncEventingBasicConsumer"/> u
+/// WorkerConsumerLoopTests (konstruktor zahtijeva IChannel, ali ga ne koristi) i za Worker.HandleAsync u
+/// WorkerHandleAsyncTests, koji na sretnom putu samo ack-uje - ack se bilježi, sve ostalo baca.
 /// </summary>
 internal sealed class NoOpChannel : IChannel
 {
+    private readonly List<ulong> _acked = [];
+
+    /// <summary>Delivery tag-ovi potvrđeni preko <see cref="BasicAckAsync"/>, sortirani.</summary>
+    public IReadOnlyList<ulong> Acked
+    {
+        get { lock (_acked) return _acked.Order().ToList(); }
+    }
+
     public int ChannelNumber => 1;
     public ShutdownEventArgs? CloseReason => null;
     public IAsyncBasicConsumer? DefaultConsumer { get; set; }
@@ -29,10 +34,15 @@ internal sealed class NoOpChannel : IChannel
     public event AsyncEventHandler<ShutdownEventArgs>? ChannelShutdownAsync { add { } remove { } }
 
     private static NotImplementedException NotUsed() =>
-        new("NoOpChannel: not implemented - WorkerConsumerLoopTests never performs a real channel operation.");
+        new("NoOpChannel: not implemented - the tests only use BasicAckAsync.");
 
     public ValueTask<ulong> GetNextPublishSequenceNumberAsync(CancellationToken cancellationToken = default) => throw NotUsed();
-    public ValueTask BasicAckAsync(ulong deliveryTag, bool multiple, CancellationToken cancellationToken = default) => throw NotUsed();
+    public ValueTask BasicAckAsync(ulong deliveryTag, bool multiple, CancellationToken cancellationToken = default)
+    {
+        lock (_acked) _acked.Add(deliveryTag);
+        return ValueTask.CompletedTask;
+    }
+
     public ValueTask BasicNackAsync(ulong deliveryTag, bool multiple, bool requeue, CancellationToken cancellationToken = default) => throw NotUsed();
     public Task BasicCancelAsync(string consumerTag, bool noWait = false, CancellationToken cancellationToken = default) => throw NotUsed();
     public Task<string> BasicConsumeAsync(string queue, bool autoAck, string consumerTag, bool noLocal, bool exclusive, IDictionary<string, object?>? arguments, IAsyncBasicConsumer consumer, CancellationToken cancellationToken = default) => throw NotUsed();
