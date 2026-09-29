@@ -116,6 +116,8 @@ flutter run --dart-define=GO_BEYOND_API_URL=http://10.0.2.2:5000
 
 `10.0.2.2` je adresa host računara iz Android emulatora. Za fizički uređaj koristite IP adresu računara (npr. `http://192.168.1.10:5000`).
 
+Android build koristi Gradle 9.1 i radi sa JDK-om koji dolazi uz Android Studio (i JDK 25), kao i sa JDK 17/21, bez dodatnog podešavanja. Prvi build preuzima Gradle (~230 MB) i traje nekoliko minuta. Projekat sadrži i `windows`/`linux` folder, pa i ovdje `flutter pub get` traži **Developer Mode** (vidi desktop aplikaciju iznad).
+
 ## Konfiguracija
 
 - Sva konfiguracija backenda i pomoćnog servisa je na jednom mjestu: `appsettings.Shared.json`. To su konekcijski string, JWT, RabbitMQ, SMTP, Stripe, intervali obavijesti i ograničenja uploada.
