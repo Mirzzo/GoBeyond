@@ -132,6 +132,15 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
 - Agent `email` (Sonnet): compose default na Mailpit samo bez `.env`, zabrana slanja na seed domene, provjera stvarne dostave (IMAP, samo test poruka), .env.example/README, testovi.
 - email **9/10 — prihvaćeno**: compose `Smtp__Host: ${Smtp__Host:-mailpit}` (bez `.env` sve ide u Mailpit kao prije), `Smtp:SuppressedRecipientDomains: ["gobeyond.ba"]` — mailovi seed korisnicima se ne šalju preko pravog SMTP-a (samo log, bez retry-a). Stvarna dostava potvrđena preko IMAP-a (plus-adresa, č/ć/š/đ ispravni, test poruka obrisana). 162 testa. Stack radi sa Gmail postavkama iz `.env`. Gmail limit ~500 mailova/dan.
 
+## Sesija 4 (29.09.2026.) — testiranje na Android emulatoru + popravke
+
+- Zahtjev: subagenti testiraju aplikaciju po test planu; svaki nađeni bug ide u novi task za popravku; glavni agent je reviewer i ocjena mora biti **veća od 8**. Prioriteti: Stripe plaćanje, notifikacije (in-app + email), background jobovi. Korisnik je odobrio svoj nalog za E2E (klijent, Gmail adresa; lozinka NE ide u repo). Za email notifikacije glavni agent pita korisnika da li je mail stigao.
+- Okruženje: Android Studio instaliran; kreiran AVD `GoBeyond_API35` (Pixel 7, Android 15, `system-images;android-35;google_apis;x86_64`), `emulator-5554`.
+- Test plan: `docs/testing/TEST_PLAN.md` (PAY/NOT/BG/AUTH/SEC/MEN/PLN/PRG/MSG/ADM/DSK/MOB/REG).
+- Bug #0 (prije testova): `flutter build apk` pada sa JDK 25 iz Android Studija (Gradle 8.14 ne podržava Javu 25). Popravka: Gradle wrapper 9.1.0 (provjereno JDK 17/21/25). Ocjena **9/10**, commit `a293617`.
+- Testiranje: workflow 1 (7 testera: payments-api, notifications-api, background-jobs na izolovanoj instanci, api-security-auth, api-features, desktop, code-audit-p1 + verifikatori) i workflow 2 (E2E na emulatoru sa korisnikovim nalogom: M1 plaćanja → M2 notifikacije/plan/poruke → M3 produženje + podsjetnik pred istek + verifikator).
+- Zaostali kontejner `epic_jepsen` (stari email-consumer bez RabbitMQ konfiguracije) — brisanje nije dozvoljeno agentu; korisnik ga može ukloniti sa `docker rm -f epic_jepsen`.
+
 ## Sljedeći koraci (korisnik)
 
 1. **Stripe ključevi za ocjenjivača:** ključevi su lokalno u `.env` (29.09.2026.), ali `.env` se ne commituje. Treba odlučiti kako ih ocjenjivač dobija (npr. `.env` u zip-u sa lozinkom, ili prema uputama za predaju).
