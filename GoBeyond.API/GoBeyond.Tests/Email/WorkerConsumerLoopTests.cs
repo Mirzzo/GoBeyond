@@ -50,14 +50,12 @@ public class WorkerConsumerLoopTests
         Assert.False(Worker.ShouldKeepConsuming(connectionOpen: true, channelOpen: true, consumerCancelled: false, cts.Token));
     }
 
-    // Review defect: the tests above only exercise ShouldKeepConsuming, a pure boolean AND. They still pass
-    // even if the actual event wiring (consumer.UnregisteredAsync/ShutdownAsync -> cancelled.TrySetResult())
-    // is deleted from Worker.ExecuteAsync, because nothing calls Worker.WireCancellationSignal at all. The
-    // tests below exercise that wiring directly against a REAL AsyncEventingBasicConsumer (with a stub
-    // IChannel - NoOpChannel - that is never actually used), calling the same Handle*Async methods
-    // RabbitMQ.Client's own dispatch loop calls when the broker cancels the consumer or the channel shuts
-    // down. Deleting the UnregisteredAsync/ShutdownAsync subscriptions from WireCancellationSignal makes
-    // these fail (the TaskCompletionSource never completes), unlike the ShouldKeepConsuming-only tests above.
+    // The tests above only exercise ShouldKeepConsuming, a pure boolean AND. They still pass even if the actual
+    // event wiring (consumer.UnregisteredAsync/ShutdownAsync -> cancelled.TrySetResult()) is deleted from
+    // Worker.ExecuteAsync, because nothing calls Worker.WireCancellationSignal at all. The tests below exercise
+    // that wiring directly against a REAL AsyncEventingBasicConsumer (with a stub IChannel - NoOpChannel - that
+    // is never actually used), calling the same Handle*Async methods RabbitMQ.Client's own dispatch loop calls
+    // when the broker cancels the consumer or the channel shuts down.
 
     [Fact]
     public async Task WireCancellationSignal_CompletesTask_WhenBrokerCancelsConsumer()
@@ -66,7 +64,7 @@ public class WorkerConsumerLoopTests
         // and connection stay open; only the consumer is unregistered.
         var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance);
+        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance, CancellationToken.None);
 
         Assert.False(cancelled.Task.IsCompleted);
 
@@ -82,7 +80,7 @@ public class WorkerConsumerLoopTests
         // shuts down, which also unregisters the consumer.
         var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance);
+        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance, CancellationToken.None);
 
         var reason = new ShutdownEventArgs(ShutdownInitiator.Peer, 320, "CONNECTION_FORCED - Closed via management plugin");
         await consumer.HandleChannelShutdownAsync(new NoOpChannel(), reason);
@@ -96,10 +94,68 @@ public class WorkerConsumerLoopTests
         // Control: a normal successful registration (basic.consume-ok) must NOT trigger a reconnect.
         var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance);
+        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance, CancellationToken.None);
 
         await consumer.HandleBasicConsumeOkAsync("consumer-tag", CancellationToken.None);
 
         Assert.False(cancelled.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task ShutdownAsync_LogsReconnecting_WhenInitiatedByThePeer()
+    {
+        var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
+        var logger = new RecordingLogger();
+        Worker.WireCancellationSignal(consumer, new TaskCompletionSource(), logger, CancellationToken.None);
+
+        var reason = new ShutdownEventArgs(ShutdownInitiator.Peer, 320, "CONNECTION_FORCED - Closed via management plugin");
+        await consumer.HandleChannelShutdownAsync(new NoOpChannel(), reason);
+
+        Assert.Contains(logger.Messages, m => m.Contains("reconnecting"));
+    }
+
+    [Fact]
+    public async Task ShutdownAsync_DoesNotLogReconnecting_WhenTheDisposeIsSelfInitiated()
+    {
+        // A self-initiated Close/Dispose (Initiator == Application) happens both on a graceful stop and when
+        // the Worker tears down a connection it already knows is dead before reconnecting - neither is new
+        // information that warrants a "reconnecting" warning.
+        var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
+        var logger = new RecordingLogger();
+        Worker.WireCancellationSignal(consumer, new TaskCompletionSource(), logger, CancellationToken.None);
+
+        var reason = new ShutdownEventArgs(ShutdownInitiator.Application, 200, "Goodbye");
+        await consumer.HandleChannelShutdownAsync(new NoOpChannel(), reason);
+
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("reconnecting"));
+    }
+
+    [Fact]
+    public async Task ShutdownAsync_DoesNotLogReconnecting_DuringAGracefulStop_EvenIfPeerInitiated()
+    {
+        using var stopping = new CancellationTokenSource();
+        var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
+        var logger = new RecordingLogger();
+        Worker.WireCancellationSignal(consumer, new TaskCompletionSource(), logger, stopping.Token);
+        stopping.Cancel();
+
+        var reason = new ShutdownEventArgs(ShutdownInitiator.Peer, 320, "CONNECTION_FORCED - Closed via management plugin");
+        await consumer.HandleChannelShutdownAsync(new NoOpChannel(), reason);
+
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("reconnecting"));
+    }
+
+    [Fact]
+    public async Task UnregisteredAsync_DoesNotLogBrokerCancelled_DuringAGracefulStop()
+    {
+        using var stopping = new CancellationTokenSource();
+        var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
+        var logger = new RecordingLogger();
+        Worker.WireCancellationSignal(consumer, new TaskCompletionSource(), logger, stopping.Token);
+        stopping.Cancel();
+
+        await consumer.HandleBasicCancelAsync("consumer-tag", CancellationToken.None);
+
+        Assert.Empty(logger.Messages);
     }
 }
