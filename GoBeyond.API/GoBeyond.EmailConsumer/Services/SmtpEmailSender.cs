@@ -69,8 +69,12 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
             .Append(WebUtility.HtmlEncode(fromName))
             .Append("</p>");
 
-        var normalized = NormalizeLineBreaks(body, "\n");
-        foreach (var paragraph in normalized.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+        // Više praznih redova zaredom je i dalje jedan razmak između paragrafa, ne prazan red unutar paragrafa.
+        var paragraphs = NormalizeLineBreaks(body, "\n")
+            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Select(paragraph => paragraph.Trim('\n'))
+            .Where(paragraph => paragraph.Length > 0);
+        foreach (var paragraph in paragraphs)
         {
             var lines = paragraph.Split('\n').Select(WebUtility.HtmlEncode);
             html.Append("<p style=\"margin:0 0 12px;\">").Append(string.Join("<br>", lines)).Append("</p>");

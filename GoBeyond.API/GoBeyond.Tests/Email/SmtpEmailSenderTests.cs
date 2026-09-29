@@ -53,6 +53,17 @@ public class SmtpEmailSenderTests
     }
 
     [Fact]
+    public async Task SendAsync_TreatsSeveralBlankLinesAsOneParagraphBreak_InTheHtmlPart()
+    {
+        var (data, _) = await SendAndCaptureAsync("Prvi paragraf\n\n\nDrugi paragraf\n\n\n\nTreći paragraf");
+
+        var htmlText = FindPart(data, "text/html").Decode();
+        Assert.Contains(ParagraphStart + "Drugi paragraf</p>", htmlText);
+        Assert.Contains(ParagraphStart + "Treći paragraf</p>", htmlText);
+        Assert.DoesNotContain("<br>", htmlText);
+    }
+
+    [Fact]
     public async Task SendAsync_HtmlEncodesTheBody_SoItCannotInjectMarkup()
     {
         var (data, _) = await SendAndCaptureAsync("<script>alert(1)</script> & tekst");
