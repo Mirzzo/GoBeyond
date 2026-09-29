@@ -27,6 +27,10 @@ Prijava: `mobile` / `test` ili `client` / `test`.
 - Historija treninga po godini i mjesecu: slika, težina, obimi, snaga, kondicija, HISTORIJA PLANA i grafikon težine.
 - Profil i promjena lozinke, recenzije mentora, obavijesti, poruke sa mentorom.
 
+## Jezik
+
+Sve poruke i tekstovi aplikacije su na bosanskom, uključujući Material/Cupertino elemente (npr. izbor datuma). Izuzetak je sadržaj Stripe PaymentSheet-a (unos kartice kod KUPI PLAN, PRODUŽI i NASTAVI PLAĆANJE): taj ekran prikazuje Stripe SDK prema jeziku uređaja, a Stripe nema bosanski prevod, pa je na uređaju podešenom na bosanski (ili engleski) taj ekran na engleskom. Poruke koje aplikacija prikazuje nakon PaymentSheet-a (npr. odbijena kartica) su na bosanskom (`lib/core/utils/stripe_error_messages.dart`).
+
 ## Testovi
 
 ```powershell
