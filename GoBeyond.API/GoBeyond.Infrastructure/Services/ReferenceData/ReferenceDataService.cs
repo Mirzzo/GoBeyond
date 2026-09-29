@@ -1,6 +1,7 @@
 using GoBeyond.Core.Entities;
 using GoBeyond.Core.Exceptions;
 using GoBeyond.Core.SearchObjects;
+using GoBeyond.Infrastructure.Common;
 using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Services.Base;
 using Microsoft.EntityFrameworkCore;
@@ -19,11 +20,8 @@ public abstract class ReferenceDataService<TEntity, TModel, TUpsert>(GoBeyondDbC
 
     protected override IQueryable<TEntity> ApplyFilter(IQueryable<TEntity> query, ReferenceSearchObject search)
     {
-        if (!string.IsNullOrWhiteSpace(search.Name))
-        {
-            var name = search.Name.Trim();
+        if (search.Name.NormalizeSearch() is { } name)
             query = query.Where(x => x.Name.Contains(name));
-        }
         return query;
     }
 

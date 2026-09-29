@@ -34,6 +34,18 @@ public static class QueryExtensions
     public static readonly SubscriptionStatus[] OpenStatuses =
         [SubscriptionStatus.PendingPayment, SubscriptionStatus.AwaitingMentor, SubscriptionStatus.Active];
 
-    public static string? NormalizeSearch(this string? search) =>
-        string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+    /// <summary>Najduži pojam pretrage koji ide u upit (duži se skraćuje; SQL Server odbija LIKE uzorak duži od 4000 znakova).</summary>
+    public const int MaxSearchLength = 100;
+
+    /// <summary>Pojam pretrage bez razmaka na krajevima, skraćen na <see cref="MaxSearchLength"/> znakova; prazan → null.</summary>
+    public static string? NormalizeSearch(this string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return null;
+        var term = search.Trim();
+        if (term.Length <= MaxSearchLength) return term;
+
+        // Ne prepolovljuje emoji/surogatni par na granici.
+        var length = char.IsHighSurrogate(term[MaxSearchLength - 1]) ? MaxSearchLength - 1 : MaxSearchLength;
+        return term[..length].TrimEnd();
+    }
 }
