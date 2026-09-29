@@ -19,7 +19,7 @@ using Microsoft.Extensions.Options;
 namespace GoBeyond.Tests.Progress;
 
 /// <summary>
-/// B3 (PRG-04): "HISTORIJA PLANA" snapshot se prilaže samo unosu napretka za TEKUĆI mjesec - za prošle
+/// PRG-04: "HISTORIJA PLANA" snapshot se prilaže samo unosu napretka za TEKUĆI mjesec - za prošle
 /// mjesece trenutni plan možda tada nije ni postojao, pa se ne smije lažno prikazati kao historija.
 /// </summary>
 public sealed class ProgressServiceTests : IDisposable

@@ -10,7 +10,7 @@ using Microsoft.Data.Sqlite;
 namespace GoBeyond.Tests.Messages;
 
 /// <summary>
-/// B3 (NOT-06): mentor ne smije vidjeti zahtjev koji klijent nikad nije platio, ni kad je u međuvremenu
+/// NOT-06: mentor ne smije vidjeti zahtjev koji klijent nikad nije platio, ni kad je u međuvremenu
 /// otkazan (PendingPayment → Cancelled bez PaidAt), ni u listi razgovora ni pri direktnom pristupu nitima.
 /// </summary>
 public sealed class MessageServiceTests : IDisposable

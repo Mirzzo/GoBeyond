@@ -12,7 +12,7 @@ const _statusOptions = ['PendingPayment', 'AwaitingMentor', 'Active', 'Rejected'
 /// Warning shown in the OTKAŽI confirmation dialog. An AwaitingMentor
 /// subscription was already paid for by the client (create-intent +
 /// confirm) but never accepted by the mentor, so admin cancel refunds it
-/// (see admin-cancel-awaiting-mentor-no-refund) — the dialog must say so,
+/// and the dialog must say so,
 /// the same way mentor reject already warns about the refund.
 String subscriptionCancelWarning({
   required String? status,

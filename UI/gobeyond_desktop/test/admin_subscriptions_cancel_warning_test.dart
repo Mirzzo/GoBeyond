@@ -3,7 +3,7 @@ import 'package:gobeyond_desktop/presentation/screens/admin/admin_subscriptions_
 
 /// admin-cancel-awaiting-mentor-no-refund (desktop part): an AwaitingMentor
 /// subscription was already paid for by the client but never accepted by
-/// the mentor. The backend (group B1) refunds it on admin cancel, so the
+/// the mentor. The backend refunds it on admin cancel, so the
 /// OTKAŽI confirmation dialog must say the client's payment will be
 /// refunded — otherwise the admin cancels believing (as the old text
 /// implied) that only a notification is sent.

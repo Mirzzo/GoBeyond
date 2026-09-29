@@ -17,7 +17,7 @@ using Microsoft.Extensions.Options;
 namespace GoBeyond.Tests.Plans;
 
 /// <summary>
-/// B3: obavijesti o objavi/ažuriranju plana moraju biti rodno neutralne (bez "Mentor ... je objavio/ažurirao"),
+/// Obavijesti o objavi/ažuriranju plana moraju biti rodno neutralne (bez "Mentor ... je objavio/ažurirao"),
 /// a treninzi se ne mogu evidentirati kad saradnja više nije aktivna (otkazana pretplata ili obrisan mentor),
 /// iako je plan i dalje formalno u statusu Published.
 /// </summary>

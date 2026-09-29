@@ -11,7 +11,7 @@ using GoBeyond.Infrastructure.Configuration;
 namespace GoBeyond.Tests.Validation;
 
 /// <summary>
-/// B3 (PLN-02): slobodni tekst se mora trimovati PRIJE provjere minimalne dužine, inače razmacima
+/// PLN-02: slobodni tekst se mora trimovati PRIJE provjere minimalne dužine, inače razmacima
 /// "napunjen" string prođe validaciju iako je stvarni (trimovani) sadržaj prekratak.
 /// Kao dokaz da se vrijednost zaista trima (ne samo validira), svaki test i provjerava rezultujuću vrijednost.
 /// </summary>
@@ -136,7 +136,7 @@ public class TrimBeforeLengthValidationTests
     }
 }
 
-/// <summary>B3 (PAY-13): mjesečna cijena mentora smije imati najviše dvije decimale (kolona je decimal(10,2)).</summary>
+/// <summary>PAY-13: mjesečna cijena mentora smije imati najviše dvije decimale (kolona je decimal(10,2)).</summary>
 public class MonthlyPricePrecisionTests
 {
     private static bool IsPropertyValid<T>(T instance, string propertyName, out List<ValidationResult> results) where T : notnull
@@ -170,7 +170,7 @@ public class MonthlyPricePrecisionTests
     }
 }
 
-/// <summary>B3 (AUTH-10): poruka o prevelikom zahtjevu mora biti gramatički ispravna i generička (vrijedi i za endpointe sa jednim fajlom).</summary>
+/// <summary>AUTH-10: poruka o prevelikom zahtjevu mora biti gramatički ispravna i generička (vrijedi i za endpointe sa jednim fajlom).</summary>
 public class RequestTooLargeMessageTests
 {
     [Fact]
