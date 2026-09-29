@@ -74,6 +74,38 @@ void main() {
     expect(find.text('Nemate obavijesti.'), findsNothing);
   });
 
+  testWidgets('the no-results message stays above the keyboard while the '
+      'search is being typed', (tester) async {
+    // A 1080x2400 phone in logical px, with the keyboard (and its
+    // suggestion strip) covering the lower part of the screen.
+    const screen = Size(411, 914);
+    const keyboardHeight = 400.0;
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = screen;
+    tester.view.viewInsets = const FakeViewPadding(bottom: keyboardHeight);
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.theme,
+        home: NotificationsScreen(
+            notificationRepository: _CountingNotificationRepository()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'zzqqxx');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    final keyboardTop = screen.height - keyboardHeight;
+    final message = find.text('Nema obavijesti za zadanu pretragu.');
+    expect(message, findsOneWidget);
+    expect(tester.getRect(message).bottom, lessThanOrEqualTo(keyboardTop));
+    expect(tester.getRect(find.byIcon(Icons.search_off_rounded)).bottom,
+        lessThanOrEqualTo(keyboardTop));
+  });
+
   testWidgets('pull-to-refresh keeps the notifications on screen while it '
       'reloads', (tester) async {
     final repository = _CountingNotificationRepository()

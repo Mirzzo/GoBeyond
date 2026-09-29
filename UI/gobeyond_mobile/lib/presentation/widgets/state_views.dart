@@ -54,6 +54,9 @@ class ErrorView extends StatelessWidget {
 /// above it can still detect the pull gesture: those states are a plain
 /// `Center`, which doesn't scroll on its own, so pulling down on them would
 /// otherwise do nothing.
+///
+/// The state is centred in the space the scrollable actually gets, which
+/// shrinks while the keyboard is open, so it stays visible above it.
 class PullToRefreshFallback extends StatelessWidget {
   const PullToRefreshFallback({super.key, required this.child});
 
@@ -61,14 +64,19 @@ class PullToRefreshFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: [
-        SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.7,
-          child: child,
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) => ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight:
+                  constraints.hasBoundedHeight ? constraints.maxHeight : 0,
+            ),
+            child: child,
+          ),
+        ],
+      ),
     );
   }
 }
