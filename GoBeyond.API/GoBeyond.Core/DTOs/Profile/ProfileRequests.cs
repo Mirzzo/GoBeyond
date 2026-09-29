@@ -3,18 +3,32 @@ using GoBeyond.Core.Validation;
 
 namespace GoBeyond.Core.DTOs.Profile;
 
-/// <summary>Osnovni podaci korisničkog računa (registracija, uređivanje profila, admin uređivanje).</summary>
+/// <summary>
+/// Osnovni podaci korisničkog računa (registracija, uređivanje profila, admin uređivanje). Ime i prezime se trimuju prije
+/// provjere dužine, pa ime dopunjeno razmacima do minimuma ne prolazi.
+/// </summary>
 public class AccountFieldsRequest
 {
+    private string _firstName = string.Empty;
+    private string _lastName = string.Empty;
+
     [Required(ErrorMessage = "Ime je obavezno.")]
     [StringLength(50, MinimumLength = 2, ErrorMessage = "Ime mora imati 2–50 znakova.")]
     [RegularExpression(ValidationPatterns.Name, ErrorMessage = "Ime smije sadržavati samo slova, razmak, apostrof i crticu (2–50 znakova).")]
-    public string FirstName { get; set; } = string.Empty;
+    public string FirstName
+    {
+        get => _firstName;
+        set => _firstName = value?.Trim() ?? string.Empty;
+    }
 
     [Required(ErrorMessage = "Prezime je obavezno.")]
     [StringLength(50, MinimumLength = 2, ErrorMessage = "Prezime mora imati 2–50 znakova.")]
     [RegularExpression(ValidationPatterns.Name, ErrorMessage = "Prezime smije sadržavati samo slova, razmak, apostrof i crticu (2–50 znakova).")]
-    public string LastName { get; set; } = string.Empty;
+    public string LastName
+    {
+        get => _lastName;
+        set => _lastName = value?.Trim() ?? string.Empty;
+    }
 
     [Required(ErrorMessage = "Korisničko ime je obavezno.")]
     [RegularExpression(ValidationPatterns.Username, ErrorMessage = ValidationPatterns.UsernameMessage)]

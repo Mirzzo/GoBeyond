@@ -5,6 +5,7 @@ using GoBeyond.Core.DTOs.Communication;
 using GoBeyond.Core.DTOs.Plans;
 using GoBeyond.Core.DTOs.Profile;
 using GoBeyond.Core.DTOs.Progress;
+using GoBeyond.Core.DTOs.Reference;
 using GoBeyond.Core.DTOs.Subscriptions;
 using GoBeyond.Infrastructure.Configuration;
 
@@ -123,6 +124,65 @@ public class TrimBeforeLengthValidationTests
     {
         var request = new RegisterMentorRequest { Bio = "   " + new string('a', 20) + "   " };
         Assert.False(IsPropertyValid(request, nameof(RegisterMentorRequest.Bio), out _));
+    }
+
+    [Theory]
+    [InlineData(typeof(RegisterClientRequest))]
+    [InlineData(typeof(RegisterMentorRequest))]
+    [InlineData(typeof(UpdateProfileRequest))]
+    [InlineData(typeof(AdminUpdateUserRequest))]
+    public void AccountRequests_FirstAndLastName_PaddedTooShort_FailWithLengthMessage(Type type)
+    {
+        var request = (AccountFieldsRequest)Activator.CreateInstance(type)!;
+        request.FirstName = "A     ";
+        request.LastName = "Q        ";
+
+        Assert.Equal("A", request.FirstName);
+        Assert.Equal("Q", request.LastName);
+        Assert.False(IsPropertyValid(request, nameof(AccountFieldsRequest.FirstName), out var firstName));
+        Assert.Contains(firstName, x => x.ErrorMessage == "Ime mora imati 2–50 znakova.");
+        Assert.False(IsPropertyValid(request, nameof(AccountFieldsRequest.LastName), out var lastName));
+        Assert.Contains(lastName, x => x.ErrorMessage == "Prezime mora imati 2–50 znakova.");
+    }
+
+    [Fact]
+    public void AccountRequest_PaddedValidNames_AreTrimmedAndPass()
+    {
+        var request = new UpdateProfileRequest { FirstName = "  Ana-Marija ", LastName = " O'Brien  " };
+
+        Assert.Equal("Ana-Marija", request.FirstName);
+        Assert.Equal("O'Brien", request.LastName);
+        Assert.True(IsPropertyValid(request, nameof(AccountFieldsRequest.FirstName), out _));
+        Assert.True(IsPropertyValid(request, nameof(AccountFieldsRequest.LastName), out _));
+    }
+
+    [Fact]
+    public void TrainingTypeUpsertRequest_NameAndDescription_PaddedTooShort_FailValidation() =>
+        AssertAllStringPropertiesRejectPaddedSingleChar(new TrainingTypeUpsertRequest());
+
+    [Fact]
+    public void GenderUpsertRequest_Name_PaddedTooShort_FailsValidation() =>
+        AssertAllStringPropertiesRejectPaddedSingleChar(new GenderUpsertRequest());
+
+    [Fact]
+    public void FitnessGoalUpsertRequest_NamePaddedTooShort_FailsAndDescriptionIsTrimmed()
+    {
+        var request = new FitnessGoalUpsertRequest { Name = "a     ", Description = "  Više snage  " };
+
+        Assert.False(IsPropertyValid(request, nameof(FitnessGoalUpsertRequest.Name), out var errors));
+        Assert.Contains(errors, x => x.ErrorMessage == "Naziv mora imati 2–60 znakova.");
+        Assert.Equal("Više snage", request.Description);
+        Assert.Null(new FitnessGoalUpsertRequest { Description = null }.Description);
+    }
+
+    [Fact]
+    public void FitnessLevelUpsertRequest_NamePaddedTooShort_FailsAndDescriptionIsTrimmed()
+    {
+        var request = new FitnessLevelUpsertRequest { Name = "a     ", Description = "  Tri treninga sedmično  " };
+
+        Assert.False(IsPropertyValid(request, nameof(FitnessLevelUpsertRequest.Name), out var errors));
+        Assert.Contains(errors, x => x.ErrorMessage == "Naziv mora imati 2–40 znakova.");
+        Assert.Equal("Tri treninga sedmično", request.Description);
     }
 
     [Fact]
