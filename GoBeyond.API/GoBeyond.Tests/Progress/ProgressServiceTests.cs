@@ -40,7 +40,8 @@ public sealed class ProgressServiceTests : IDisposable
             Options.Create(new LifecycleOptions { SubscriptionPeriodDays = 30 }), NullLogger<SubscriptionWorkflow>.Instance);
         var plans = new TrainingPlanService(_db, stateFactory, workflow, new RecordingNotificationSender(),
             Options.Create(new LifecycleOptions()));
-        _service = new ProgressService(_db, plans, new UnusedFileStorageService());
+        _service = new ProgressService(_db, plans, new UnusedFileStorageService(),
+            Options.Create(new LifecycleOptions { TimeZoneId = "UTC" }));
     }
 
     public void Dispose() => _connection.Dispose();

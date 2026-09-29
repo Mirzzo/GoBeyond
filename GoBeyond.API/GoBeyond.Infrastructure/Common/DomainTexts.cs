@@ -58,11 +58,14 @@ public static class DomainTexts
     /// UTC datum koji je oko ponoći dan ranije. Vrijednost bez Kind-a (iz baze) je UTC. Završna tačka je dio zapisa datuma,
     /// pa rečenica koja se završava datumom ne dodaje još jednu.
     /// </summary>
-    public static string Date(DateTime? value, string? timeZoneId = null)
+    public static string Date(DateTime? value, string? timeZoneId = null) =>
+        value is { } date ? PlatformTime(date, timeZoneId).ToString("dd.MM.yyyy.", CultureInfo.InvariantCulture) : "-";
+
+    /// <summary>Trenutak kao lokalno vrijeme platforme (npr. za tekući mjesec); vrijednost bez Kind-a (iz baze) je UTC.</summary>
+    public static DateTime PlatformTime(DateTime value, string? timeZoneId = null)
     {
-        if (value is not { } date) return "-";
-        var utc = date.Kind == DateTimeKind.Local ? date.ToUniversalTime() : DateTime.SpecifyKind(date, DateTimeKind.Utc);
-        return TimeZoneInfo.ConvertTimeFromUtc(utc, PlatformTimeZone(timeZoneId)).ToString("dd.MM.yyyy.", CultureInfo.InvariantCulture);
+        var utc = value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, PlatformTimeZone(timeZoneId));
     }
 
     /// <summary>Broj godina sa ispravnim oblikom: "1 godina", "2 godine", "5 godina", "21 godina", "22 godine", "112 godina".</summary>

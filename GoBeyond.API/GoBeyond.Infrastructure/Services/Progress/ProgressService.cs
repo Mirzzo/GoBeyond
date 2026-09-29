@@ -4,10 +4,12 @@ using GoBeyond.Core.Entities;
 using GoBeyond.Core.Exceptions;
 using GoBeyond.Core.Files;
 using GoBeyond.Infrastructure.Common;
+using GoBeyond.Infrastructure.Configuration;
 using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Services.Files;
 using GoBeyond.Infrastructure.Services.Plans;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace GoBeyond.Infrastructure.Services.Progress;
 
@@ -22,27 +24,35 @@ public interface IProgressService
     Task<List<ProgressChartPointDto>> GetChartAsync(int clientUserId, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Mjesečna historija treninga klijenta (slika + parametri + snapshot plana "HISTORIJA PLANA").</summary>
+/// <summary>
+/// Mjesečna historija treninga klijenta (slika + parametri + snapshot plana "HISTORIJA PLANA"). Tekući mjesec i godina se
+/// računaju u vremenskoj zoni platforme (Lifecycle:TimeZoneId), kao u aplikaciji: prvog u mjesecu poslije ponoći je novi
+/// mjesec već otvoren, iako je po UTC-u još prethodni. Sat se zadaje samo u testovima.
+/// </summary>
 public sealed class ProgressService(
     GoBeyondDbContext db,
     ITrainingPlanService plans,
-    IFileStorageService files) : IProgressService
+    IFileStorageService files,
+    IOptions<LifecycleOptions> lifecycleOptions,
+    TimeProvider? clock = null) : IProgressService
 {
     public const string EntryNotFound = "Za odabrani mjesec nema unosa napretka.";
+
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
     public async Task<List<int>> GetYearsAsync(int clientUserId, CancellationToken cancellationToken = default)
     {
         var clientId = await GetClientIdAsync(clientUserId, cancellationToken);
         var years = await db.ProgressEntries.Where(x => x.ClientProfileId == clientId)
             .Select(x => x.Year).Distinct().ToListAsync(cancellationToken);
-        years.Add(DateTime.UtcNow.Year);
+        years.Add(PlatformNow().Year);
         return years.Distinct().OrderByDescending(x => x).ToList();
     }
 
     public async Task<List<ProgressEntryItemDto>> GetByYearAsync(int clientUserId, int? year, CancellationToken cancellationToken = default)
     {
         var clientId = await GetClientIdAsync(clientUserId, cancellationToken);
-        var selectedYear = year ?? DateTime.UtcNow.Year;
+        var selectedYear = year ?? PlatformNow().Year;
         var entries = await db.ProgressEntries.AsNoTracking()
             .Where(x => x.ClientProfileId == clientId && x.Year == selectedYear)
             .OrderBy(x => x.Month)
@@ -64,8 +74,9 @@ public sealed class ProgressService(
         CancellationToken cancellationToken = default)
     {
         EnsureValidPeriod(year, month);
-        var now = DateTime.UtcNow;
-        if (year > now.Year || (year == now.Year && month > now.Month))
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var today = DomainTexts.PlatformTime(now, lifecycleOptions.Value.TimeZoneId);
+        if (year > today.Year || (year == today.Year && month > today.Month))
             throw new ValidationException("Nije moguće unijeti napredak za budući mjesec.");
 
         var clientId = await GetClientIdAsync(clientUserId, cancellationToken);
@@ -77,7 +88,7 @@ public sealed class ProgressService(
             entry = new ProgressEntry { ClientProfileId = clientId, Year = year, Month = month, CreatedAt = now };
             // Pri kreiranju se snima kopija plana koji klijent trenutno koristi ("HISTORIJA PLANA"), ali samo za tekući
             // mjesec - za prošle mjesece trenutni plan tada možda još nije ni postojao, pa se snapshot ne prilaže.
-            var isCurrentMonth = year == now.Year && month == now.Month;
+            var isCurrentMonth = year == today.Year && month == today.Month;
             if (isCurrentMonth && await plans.FindCurrentPlanAsync(clientId, cancellationToken) is { } plan)
             {
                 entry.TrainingPlanId = plan.Id;
@@ -149,6 +160,8 @@ public sealed class ProgressService(
         CreatedAt = entry.CreatedAt,
         UpdatedAt = entry.UpdatedAt
     };
+
+    private DateTime PlatformNow() => DomainTexts.PlatformTime(_clock.GetUtcNow().UtcDateTime, lifecycleOptions.Value.TimeZoneId);
 
     private static void EnsureValidPeriod(int year, int month)
     {
