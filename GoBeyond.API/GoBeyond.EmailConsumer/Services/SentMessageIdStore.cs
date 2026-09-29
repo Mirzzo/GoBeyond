@@ -6,22 +6,19 @@ using Microsoft.Extensions.Options;
 namespace GoBeyond.EmailConsumer.Services;
 
 /// <summary>
-/// Durable idempotency "brana" protiv duplog slanja emaila nakon pada procesa između uspješnog SMTP slanja i
-/// BasicAck-a: RabbitMQ isporučuje poruku ponovo (at-least-once), pa bi se bez ovoga isti email poslao dvaput
-/// nakon restarta. Za redelivery DOK je proces živ i prvi pokušaj još u toku vidi
-/// <see cref="InFlightSendGate"/> - ovaj store to ne pokriva jer se upisuje tek nakon uspješnog slanja.
+/// Pamti ključeve (<see cref="EmailIdempotencyKey"/>) uspješno poslanih emailova, da redelivery iste poruke
+/// (RabbitMQ je at-least-once) ne pošalje email drugi put - i nakon pada procesa između SMTP slanja i BasicAck-a.
+/// Za redelivery DOK je prvi pokušaj još u toku vidi <see cref="InFlightSendGate"/>.
 ///
-/// Pamti ključeve (<see cref="EmailIdempotencyKey"/>) uspješno poslanih poruka u append-only tekstualnom fajlu
-/// (<see cref="SmtpOptions.SentMessageIdsFilePath"/>); u docker-compose je taj fajl na imenovanom volume-u pa
-/// preživi restart kontejnera. Provjera (<see cref="WasSent"/>) se radi prije slanja, a upis
-/// (<see cref="MarkSent"/>) odmah nakon uspješnog slanja i prije ack-a. Jedini pisac je ovaj proces, a RabbitMQ
-/// prefetch=1 garantuje obradu jedne poruke odjednom, pa fajlu ne treba baza ni zaključavanje. Veličina je
+/// Ključevi se uvijek drže u memoriji, a uz to i u append-only tekstualnom fajlu
+/// (<see cref="SmtpOptions.SentMessageIdsFilePath"/>, prazna putanja = bez fajla); u docker-compose je taj fajl
+/// na imenovanom volume-u pa preživi restart kontejnera. Provjera (<see cref="WasSent"/>) se radi prije slanja,
+/// a upis (<see cref="MarkSent"/>) odmah nakon uspješnog slanja i prije ack-a. Jedini pisac fajla je ovaj
+/// proces; istovremeni pozivi (stari i oporavljeni kanal) se serijalizuju internim lock-om. Veličina je
 /// ograničena na zadnjih <see cref="MaxEntries"/> ključeva - fajl se periodično sažme umjesto da raste beskonačno.
 ///
-/// <see cref="Load"/> i <see cref="MarkSent"/> hvataju svoje IO greške (zaključan/nedostupan fajl, npr. tokom
-/// OneDrive sinhronizacije) i samo loguju upozorenje: Load() kreće sa praznim in-memory skupom umjesto da sruši
-/// pokretanje servisa, a MarkSent() greška ne smije izgledati kao neuspjelo slanje - poruka je u tom trenutku
-/// već uspješno poslana i acked, samo je trajni zapis izgubljen do sljedećeg uspješnog upisa.
+/// Greška fajla (npr. zaključan tokom OneDrive sinhronizacije) samo se loguje: <see cref="Load"/> tada kreće
+/// sa praznim skupom umjesto da sruši pokretanje servisa, a <see cref="MarkSent"/> zadrži zapis u memoriji.
 ///
 /// Stari format fajla (gole cifre, jedan MessageId po redu) se učitava bez greške - takav red nikad ne sadrži
 /// ':' pa ne pogađa nijedan novi ključ i ostaje bezopasan dok se ne izbaci kompakcijom.
@@ -52,11 +49,11 @@ public sealed class SentMessageIdStore
         Load();
     }
 
-    /// <summary>Da li je perzistencija uopšte uključena (prazna putanja = isključeno, npr. u testovima).</summary>
-    public bool IsEnabled => _path.Length > 0;
+    /// <summary>Da li se ključevi upisuju i u fajl (prazna putanja = samo u memoriji, npr. u testovima).</summary>
+    public bool IsPersistent => _path.Length > 0;
 
     /// <summary>
-    /// Putanja fajla za perzistenciju: prazna vrijednost ostaje prazna (isključeno). Apsolutna putanja (npr.
+    /// Putanja fajla za perzistenciju: prazna vrijednost ostaje prazna (bez fajla). Apsolutna putanja (npr.
     /// docker-compose-ovo <c>/data/gobeyond-consumer-sent-ids.txt</c> na imenovanom volume-u) se koristi
     /// tačno takva. Relativna putanja (podrazumijevana vrijednost iz appsettings.Shared.json kad se servis
     /// pokrene van docker-a, npr. golim <c>dotnet run</c> iz root-a repozitorija) se NIKAD ne rješava protiv
@@ -73,7 +70,7 @@ public sealed class SentMessageIdStore
 
     private void Load()
     {
-        if (!IsEnabled) return;
+        if (!IsPersistent) return;
         try
         {
             if (!File.Exists(_path)) return;
@@ -98,38 +95,40 @@ public sealed class SentMessageIdStore
     /// <summary>True ako je poruka sa ovim ključem (<see cref="EmailIdempotencyKey"/>) već ranije uspješno poslana.</summary>
     public bool WasSent(string key)
     {
-        if (!IsEnabled || string.IsNullOrEmpty(key)) return false;
+        if (string.IsNullOrEmpty(key)) return false;
         lock (_gate) return _ids.Contains(key);
     }
 
-    /// <summary>Bilježi uspješno slanje. Pozvati ODMAH nakon SMTP potvrde, PRIJE BasicAck-a (vidi napomenu iznad).</summary>
+    /// <summary>
+    /// Bilježi uspješno slanje. Pozvati ODMAH nakon SMTP potvrde, PRIJE BasicAck-a. Nikad ne baca: email je u tom
+    /// trenutku već poslan, pa greška upisa ne smije izgledati kao neuspjelo slanje.
+    /// </summary>
     public void MarkSent(string key)
     {
-        if (!IsEnabled || string.IsNullOrEmpty(key)) return;
+        if (string.IsNullOrEmpty(key)) return;
         lock (_gate)
         {
             if (!_ids.Add(key)) return; // već zabilježeno (npr. redelivery prije nego je stigao ack)
             _order.Enqueue(key);
 
+            var compact = _order.Count > MaxEntries + CompactSlack;
+            if (compact)
+            {
+                while (_order.Count > MaxEntries)
+                    _ids.Remove(_order.Dequeue());
+            }
+            if (!IsPersistent) return;
+
             try
             {
                 var directory = Path.GetDirectoryName(_path);
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-                File.AppendAllText(_path, key + Environment.NewLine);
-
-                if (_order.Count > MaxEntries + CompactSlack)
-                {
-                    while (_order.Count > MaxEntries)
-                        _ids.Remove(_order.Dequeue());
-                    File.WriteAllLines(_path, _order);
-                }
+                if (compact) File.WriteAllLines(_path, _order);
+                else File.AppendAllText(_path, key + Environment.NewLine);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex)
             {
-                // Poruka je u ovom trenutku već uspješno poslana preko SMTP-a (ovaj metod se zove poslije
-                // SendAsync-a, prije BasicAck-a) - neuspio upis na disk ne smije izgledati kao neuspjelo slanje.
-                // In-memory zapis (_ids.Add gore) ostaje, pa ovaj proces i dalje prepoznaje redelivery dok radi;
-                // samo je trajni zapis izgubljen, pa restart procesa gubi tu zaštitu za baš ovu poruku.
+                // In-memory zapis ostaje, pa ovaj proces i dalje prepoznaje redelivery; gubi se samo trajni zapis.
                 _logger.LogWarning(ex, "Could not persist Email {Key} to the sent-ids store at '{Path}'; a redelivery after a " +
                     "process restart could resend it once. The email itself was already sent successfully.", key, _path);
             }

@@ -73,18 +73,32 @@ public class SentMessageIdStoreTests : IDisposable
     }
 
     [Fact]
-    public void IsEnabled_IsFalse_ForEmptyPath()
+    public void IsPersistent_IsFalse_ForEmptyPath()
     {
         var store = new SentMessageIdStore(string.Empty);
-        Assert.False(store.IsEnabled);
+        Assert.False(store.IsPersistent);
     }
 
+    // Without a file the store still dedupes within this process (InFlightSendGate relies on it).
     [Fact]
-    public void WasSent_AlwaysFalse_AndMarkSentIsNoOp_WhenDisabled()
+    public void WasSent_KeepsAnInMemoryRecord_WhenThereIsNoFile()
     {
         var store = new SentMessageIdStore(path: null);
         store.MarkSent("1:1:x");
+        Assert.True(store.WasSent("1:1:x"));
+        Assert.False(store.WasSent("2:1:x"));
+    }
+
+    [Fact]
+    public void Store_WithoutAFile_IsBoundedInSize()
+    {
+        var store = new SentMessageIdStore(path: null);
+        var total = SentMessageIdStore.MaxEntries + 500;
+        for (var id = 1; id <= total; id++)
+            store.MarkSent($"{id}:1:x");
+
         Assert.False(store.WasSent("1:1:x"));
+        Assert.True(store.WasSent($"{total}:1:x"));
     }
 
     [Fact]
@@ -133,7 +147,7 @@ public class SentMessageIdStoreTests : IDisposable
         try
         {
             var store = new SentMessageIdStore(directoryPath, NullLogger.Instance);
-            Assert.True(store.IsEnabled);
+            Assert.True(store.IsPersistent);
             Assert.False(store.WasSent("1:1:x")); // started with an empty in-memory set, did not throw
         }
         finally
@@ -152,13 +166,12 @@ public class SentMessageIdStoreTests : IDisposable
 
         var store = new SentMessageIdStore(_path, NullLogger.Instance);
 
-        Assert.True(store.IsEnabled);
+        Assert.True(store.IsPersistent);
         Assert.False(store.WasSent("109:100:abc")); // Load() could not read the locked file, started empty
     }
 
-    // MarkSent must never propagate an IO failure - the caller (Worker.HandleAsync) calls it AFTER a
-    // successful SMTP send and must still be able to ack. Pointing the path at a directory makes the
-    // AppendAllText write fail every time.
+    // MarkSent runs after a successful SMTP send, so a write failure must never surface as an exception.
+    // Pointing the path at a directory makes every AppendAllText fail.
     [Fact]
     public void MarkSent_DoesNotThrow_WhenTheFileCannotBeWritten()
     {
@@ -176,6 +189,17 @@ public class SentMessageIdStoreTests : IDisposable
         {
             Directory.Delete(directoryPath, recursive: true);
         }
+    }
+
+    [Fact]
+    public void MarkSent_DoesNotThrow_WhenThePathIsInvalid()
+    {
+        var store = new SentMessageIdStore("sent\0ids.txt", NullLogger.Instance); // File.AppendAllText throws ArgumentException
+
+        var exception = Record.Exception(() => store.MarkSent("1:1:x"));
+
+        Assert.Null(exception);
+        Assert.True(store.WasSent("1:1:x"));
     }
 
     [Theory]
