@@ -24,9 +24,16 @@ import '../plan/plan_full_text_screen.dart';
 /// Mockup 14: GODINA/MJESEC pickers, the month's photo + Težina/Obimi/Snaga/
 /// Kondicija, HISTORIJA PLANA popup, and a weight-over-time chart.
 class TrainingHistoryScreen extends StatefulWidget {
-  const TrainingHistoryScreen({super.key, this.progressRepository});
+  const TrainingHistoryScreen({
+    super.key,
+    this.progressRepository,
+    this.clock = DateTime.now,
+  });
 
   final ProgressRepository? progressRepository;
+
+  /// Source of the current time; replaceable in tests.
+  final DateTime Function() clock;
 
   @override
   State<TrainingHistoryScreen> createState() => _TrainingHistoryScreenState();
@@ -37,20 +44,30 @@ class _TrainingHistoryScreenState extends State<TrainingHistoryScreen> {
       widget.progressRepository ?? ApiProgressRepository();
   final _picker = ImagePicker();
 
-  late int _selectedYear = DateTime.now().year;
-  late int _selectedMonth = DateTime.now().month;
+  late int _selectedYear = _nowUtc.year;
+  late int _selectedMonth = _nowUtc.month;
 
   late Future<List<int>> _yearsFuture;
-  Future<ProgressEntryItem?>? _entryFuture;
+  Future<_MonthEntry>? _entryFuture;
   Future<List<WeightPoint>>? _chartFuture;
   bool _uploadingPhoto = false;
+
+  // The backend (ProgressService.UpsertAsync) decides what a future month
+  // is by DateTime.UtcNow, so the month picker's "now" is the UTC month
+  // too; otherwise, between local and UTC midnight at the turn of a month,
+  // the app would offer a form the server then rejects.
+  DateTime get _nowUtc => widget.clock().toUtc();
+
+  Future<_MonthEntry> _fetchEntry() => _repository
+      .getEntry(_selectedYear, _selectedMonth)
+      .then((entry) => _MonthEntry(entry));
 
   @override
   void initState() {
     super.initState();
     // Set the initial futures directly (not via _reloadEntry/setState — the
     // first build hasn't happened yet, so there is nothing to re-render).
-    _entryFuture = _repository.getEntry(_selectedYear, _selectedMonth);
+    _entryFuture = _fetchEntry();
     _chartFuture = _repository.getChart();
     _yearsFuture = _repository.getYears().then((years) {
       if (years.isNotEmpty && !years.contains(_selectedYear)) {
@@ -59,7 +76,7 @@ class _TrainingHistoryScreenState extends State<TrainingHistoryScreen> {
         // entry for the corrected year needs an explicit setState.
         if (mounted) {
           setState(() {
-            _entryFuture = _repository.getEntry(_selectedYear, _selectedMonth);
+            _entryFuture = _fetchEntry();
           });
         }
       }
@@ -69,12 +86,39 @@ class _TrainingHistoryScreenState extends State<TrainingHistoryScreen> {
 
   void _reloadEntry() {
     setState(() {
-      _entryFuture = _repository.getEntry(_selectedYear, _selectedMonth);
+      _entryFuture = _fetchEntry();
     });
   }
 
+  /// Also refreshes the chart (and years list, in case a new year was just
+  /// entered) after a save, unlike [_reloadEntry] which a plain
+  /// year/month pick uses.
+  void _onEntrySaved() {
+    setState(() {
+      _entryFuture = _fetchEntry();
+      _chartFuture = _repository.getChart();
+      _yearsFuture = _repository.getYears();
+    });
+  }
+
+  Future<void> _refresh() async {
+    final years = _repository.getYears();
+    final entry = _fetchEntry();
+    final chart = _repository.getChart();
+    setState(() {
+      _yearsFuture = years;
+      _entryFuture = entry;
+      _chartFuture = chart;
+    });
+    try {
+      await Future.wait([years, entry, chart]);
+    } catch (_) {
+      // Surfaced via each FutureBuilder's own error state instead.
+    }
+  }
+
   bool get _isFutureMonth {
-    final now = DateTime.now();
+    final now = _nowUtc;
     return _selectedYear > now.year ||
         (_selectedYear == now.year && _selectedMonth > now.month);
   }
@@ -122,127 +166,144 @@ class _TrainingHistoryScreenState extends State<TrainingHistoryScreen> {
   Widget build(BuildContext context) {
     return GbScaffold(
       title: 'Historija treninga',
-      body: FutureBuilder<List<int>>(
-        future: _yearsFuture,
-        builder: (context, yearsSnapshot) {
-          if (yearsSnapshot.connectionState != ConnectionState.done) {
-            return const LoadingView();
-          }
-          if (yearsSnapshot.hasError) {
-            return ErrorView(
-                message: ApiException.from(yearsSnapshot.error!).message);
-          }
-          final years = yearsSnapshot.data!.isEmpty
-              ? [DateTime.now().year]
-              : yearsSnapshot.data!;
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<int>>(
+          future: _yearsFuture,
+          builder: (context, yearsSnapshot) {
+            // A refresh keeps the loaded page (FutureBuilder carries the
+            // previous data over while the new future runs).
+            if (!yearsSnapshot.hasData &&
+                yearsSnapshot.connectionState != ConnectionState.done) {
+              return const PullToRefreshFallback(child: LoadingView());
+            }
+            if (yearsSnapshot.hasError) {
+              return PullToRefreshFallback(
+                child: ErrorView(
+                    message: ApiException.from(yearsSnapshot.error!).message),
+              );
+            }
+            final years = yearsSnapshot.data!.isEmpty
+                ? [_nowUtc.year]
+                : yearsSnapshot.data!;
 
-          return ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              const Text('HISTORIJA TRENINGA',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _PickerField(
-                      label: 'GODINA',
-                      value: '$_selectedYear',
-                      onTap: () async {
-                        final picked = await _pickFromList<int>(
-                          context,
-                          title: 'Odaberite godinu',
-                          options: years,
-                          labelBuilder: (y) => '$y',
-                        );
-                        if (picked != null && mounted) {
-                          setState(() => _selectedYear = picked);
-                          _reloadEntry();
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _PickerField(
-                      label: 'MJESEC',
-                      value: Formatters.monthName(_selectedMonth),
-                      onTap: () async {
-                        final picked = await _pickFromList<int>(
-                          context,
-                          title: 'Odaberite mjesec',
-                          options: List.generate(12, (i) => i + 1),
-                          labelBuilder: Formatters.monthName,
-                        );
-                        if (picked != null && mounted) {
-                          setState(() => _selectedMonth = picked);
-                          _reloadEntry();
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              FutureBuilder<ProgressEntryItem?>(
-                future: _entryFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 40),
-                      child: LoadingView(),
-                    );
-                  }
-                  if (snapshot.hasError) {
-                    return ErrorView(
-                      message: ApiException.from(snapshot.error!).message,
-                      onRetry: _reloadEntry,
-                    );
-                  }
-                  return _MonthCard(
-                    key: ValueKey('$_selectedYear-$_selectedMonth'),
-                    year: _selectedYear,
-                    month: _selectedMonth,
-                    entry: snapshot.data,
-                    isFutureMonth: _isFutureMonth,
-                    uploadingPhoto: _uploadingPhoto,
-                    onUploadPhoto: _uploadPhoto,
-                    onOpenPlanHistory: _openPlanHistory,
-                    repository: _repository,
-                    onSaved: _reloadEntry,
-                  );
-                },
-              ),
-              const SizedBox(height: 26),
-              const Text('TEŽINA KROZ VRIJEME',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-              const SizedBox(height: 14),
-              FutureBuilder<List<WeightPoint>>(
-                future: _chartFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const SizedBox(height: 180, child: LoadingView());
-                  }
-                  if (snapshot.hasError) {
-                    return ErrorView(
-                        message: ApiException.from(snapshot.error!).message);
-                  }
-                  final points = snapshot.data!;
-                  if (points.length < 2) {
-                    return const AppPanel(
-                      child: Text(
-                        'Potrebno je barem dva mjesečna unosa da se prikaže grafikon.',
-                        style: TextStyle(color: AppTheme.textMuted),
-                        textAlign: TextAlign.center,
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20),
+              children: [
+                const Text('HISTORIJA TRENINGA',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _PickerField(
+                        label: 'GODINA',
+                        value: '$_selectedYear',
+                        onTap: () async {
+                          final picked = await _pickFromList<int>(
+                            context,
+                            title: 'Odaberite godinu',
+                            options: years,
+                            labelBuilder: (y) => '$y',
+                          );
+                          if (picked != null && mounted) {
+                            setState(() => _selectedYear = picked);
+                            _reloadEntry();
+                          }
+                        },
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _PickerField(
+                        label: 'MJESEC',
+                        value: Formatters.monthName(_selectedMonth),
+                        onTap: () async {
+                          final picked = await _pickFromList<int>(
+                            context,
+                            title: 'Odaberite mjesec',
+                            options: List.generate(12, (i) => i + 1),
+                            labelBuilder: Formatters.monthName,
+                          );
+                          if (picked != null && mounted) {
+                            setState(() => _selectedMonth = picked);
+                            _reloadEntry();
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                // Keyed by month: a different month starts from the loader,
+                // while a refresh or a save of the same month keeps its
+                // card on screen until the new data arrives.
+                FutureBuilder<_MonthEntry>(
+                  key: ValueKey('entry-$_selectedYear-$_selectedMonth'),
+                  future: _entryFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData &&
+                        snapshot.connectionState != ConnectionState.done) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: LoadingView(),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return ErrorView(
+                        message: ApiException.from(snapshot.error!).message,
+                        onRetry: _reloadEntry,
+                      );
+                    }
+                    return _MonthCard(
+                      key: ValueKey('$_selectedYear-$_selectedMonth'),
+                      year: _selectedYear,
+                      month: _selectedMonth,
+                      entry: snapshot.data!.entry,
+                      isFutureMonth: _isFutureMonth,
+                      uploadingPhoto: _uploadingPhoto,
+                      onUploadPhoto: _uploadPhoto,
+                      onOpenPlanHistory: _openPlanHistory,
+                      repository: _repository,
+                      onSaved: _onEntrySaved,
                     );
-                  }
-                  return _WeightChart(points: points);
-                },
-              ),
-            ],
-          );
-        },
+                  },
+                ),
+                const SizedBox(height: 26),
+                const Text('TEŽINA KROZ VRIJEME',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                const SizedBox(height: 14),
+                FutureBuilder<List<WeightPoint>>(
+                  future: _chartFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData &&
+                        snapshot.connectionState != ConnectionState.done) {
+                      return const SizedBox(height: 180, child: LoadingView());
+                    }
+                    if (snapshot.hasError) {
+                      return ErrorView(
+                          message: ApiException.from(snapshot.error!).message);
+                    }
+                    final points = snapshot.data!;
+                    if (points.length < 2) {
+                      return const AppPanel(
+                        child: Text(
+                          'Potrebno je barem dva mjesečna unosa da se prikaže grafikon.',
+                          style: TextStyle(color: AppTheme.textMuted),
+                          textAlign: TextAlign.center,
+                        ),
+                      );
+                    }
+                    return _WeightChart(points: points);
+                  },
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -284,6 +345,14 @@ class _TrainingHistoryScreenState extends State<TrainingHistoryScreen> {
       ),
     );
   }
+}
+
+/// The result of loading one month, so an empty month (no entry yet) still
+/// counts as loaded data for the FutureBuilder.
+class _MonthEntry {
+  const _MonthEntry(this.entry);
+
+  final ProgressEntryItem? entry;
 }
 
 class _PickerField extends StatelessWidget {
@@ -362,6 +431,27 @@ class _MonthCardState extends State<_MonthCard> {
   String? _error;
 
   @override
+  void didUpdateWidget(_MonthCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The card stays mounted across a refresh or a save of the same month,
+    // so show the newly loaded values if they differ from what it had.
+    final entry = widget.entry;
+    final old = oldWidget.entry;
+    if (entry == null || identical(entry, old)) return;
+    if (old != null &&
+        old.weightKg == entry.weightKg &&
+        old.measurements == entry.measurements &&
+        old.strength == entry.strength &&
+        old.conditioning == entry.conditioning) {
+      return;
+    }
+    _weightController.text = entry.weightKg.toString();
+    _measurementsController.text = entry.measurements;
+    _strengthController.text = entry.strength;
+    _conditioningController.text = entry.conditioning;
+  }
+
+  @override
   void dispose() {
     _weightController.dispose();
     _measurementsController.dispose();
@@ -429,10 +519,21 @@ class _MonthCardState extends State<_MonthCard> {
           ),
           const SizedBox(height: 10),
           TextButton.icon(
-            onPressed: widget.uploadingPhoto ? null : widget.onUploadPhoto,
+            onPressed: widget.uploadingPhoto || widget.entry == null
+                ? null
+                : widget.onUploadPhoto,
             icon: const Icon(Icons.add_a_photo_rounded),
             label: const Text('Dodaj/promijeni sliku'),
           ),
+          if (widget.entry == null)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 4),
+              child: Text(
+                'Sliku možete dodati nakon što sačuvate unos za ovaj mjesec.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 11.5),
+              ),
+            ),
           const SizedBox(height: 8),
           Form(
             key: _formKey,
@@ -444,25 +545,37 @@ class _MonthCardState extends State<_MonthCard> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   validator: (v) => Validators.numberRange(v,
-                      min: 30, max: 300, label: 'Težina'),
+                      min: 30,
+                      max: 300,
+                      label: 'Težina',
+                      gender: LabelGender.feminine),
                 ),
                 _MetricField(
                   label: 'Obimi',
                   controller: _measurementsController,
                   validator: (v) => Validators.textLength(v,
-                      min: 2, max: 300, label: 'Obimi'),
+                      min: 2,
+                      max: 300,
+                      label: 'Obimi',
+                      gender: LabelGender.plural),
                 ),
                 _MetricField(
                   label: 'Snaga',
                   controller: _strengthController,
                   validator: (v) => Validators.textLength(v,
-                      min: 2, max: 300, label: 'Snaga'),
+                      min: 2,
+                      max: 300,
+                      label: 'Snaga',
+                      gender: LabelGender.feminine),
                 ),
                 _MetricField(
                   label: 'Kondicija',
                   controller: _conditioningController,
                   validator: (v) => Validators.textLength(v,
-                      min: 2, max: 300, label: 'Kondicija'),
+                      min: 2,
+                      max: 300,
+                      label: 'Kondicija',
+                      gender: LabelGender.feminine),
                 ),
               ],
             ),
