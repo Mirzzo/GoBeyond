@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using GoBeyond.Core.Entities;
 using GoBeyond.Core.Enums;
 using GoBeyond.Tests.TestInfrastructure;
@@ -8,7 +9,8 @@ namespace GoBeyond.Tests.Subscriptions;
 
 /// <summary>
 /// DELETE /api/admin/users/{id}: klijent saznaje da mu je uplata za neprihvaćen zahtjev vraćena, a mentor dobija
-/// obavijest samo o zahtjevu koji je vidio (ne o neplaćenoj PendingPayment pretplati).
+/// obavijest samo o zahtjevu koji je vidio (ne o neplaćenoj PendingPayment pretplati). Odgovor je 200 sa porukom i
+/// upozorenjem o osporenoj uplati (null kad je nema).
 /// </summary>
 public sealed class UserDeletionSubscriptionTests
 {
@@ -21,7 +23,10 @@ public sealed class UserDeletionSubscriptionTests
 
         var response = await admin.DeleteAsync($"/api/admin/users/{UserId(factory, TestUsers.MentorA)}");
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Korisnik Test mentor.a je obrisan.", body.RootElement.GetProperty("message").GetString());
+        Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("warning").ValueKind);
         var clientNotification = Assert.Single(Notifications(factory, TestUsers.Client));
         Assert.Equal("Saradnja sa mentorom Test mentor.a je prekinuta. Razlog: Mentor je uklonjen sa platforme. " +
                      "Uplaćeni iznos od 20,00 USD biće vraćen na vašu karticu.", clientNotification.Body);
@@ -37,7 +42,7 @@ public sealed class UserDeletionSubscriptionTests
 
         var response = await admin.DeleteAsync($"/api/admin/users/{UserId(factory, TestUsers.Client)}");
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(SubscriptionStatus.Cancelled, factory.Query(db => db.Subscriptions.AsNoTracking().Single(x => x.Id == subscriptionId)).Status);
         Assert.Empty(Notifications(factory, TestUsers.MentorA));
     }
@@ -53,6 +58,26 @@ public sealed class UserDeletionSubscriptionTests
 
         var mentorNotification = Assert.Single(Notifications(factory, TestUsers.MentorA));
         Assert.Equal("Saradnja sa klijentom Test client je prekinuta. Razlog: Klijent je uklonjen sa platforme.", mentorNotification.Body);
+    }
+
+    /// <summary>GET /api/admin/subscriptions vraća uplate pretplate, sa statusom kao stringom (i Disputed).</summary>
+    [Fact]
+    public async Task AdminSubscriptionList_ReturnsThePaymentsWithTheirStatus()
+    {
+        using var factory = new GoBeyondApiFactory();
+        var subscriptionId = AddSubscription(factory, SubscriptionStatus.Cancelled, paidAmount: 20.00m);
+        factory.Query(db => db.Payments.Where(x => x.SubscriptionId == subscriptionId)
+            .ExecuteUpdate(x => x.SetProperty(p => p.Status, PaymentStatus.Disputed)));
+
+        var response = await factory.ClientFor(TestUsers.Admin).GetAsync("/api/admin/subscriptions");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var subscription = Assert.Single(body.RootElement.EnumerateArray(), x => x.GetProperty("id").GetInt32() == subscriptionId);
+        var payment = Assert.Single(subscription.GetProperty("payments").EnumerateArray());
+        Assert.Equal("Disputed", payment.GetProperty("status").GetString());
+        Assert.Equal(20.00m, payment.GetProperty("amount").GetDecimal());
+        Assert.Equal("Initial", payment.GetProperty("purpose").GetString());
     }
 
     private static int UserId(GoBeyondApiFactory factory, string username) =>

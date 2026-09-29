@@ -17,6 +17,6 @@ public sealed class AdminSubscriptionsController(ISubscriptionService subscripti
         subscriptionService.GetAllAsync(searchObject, cancellationToken);
 
     [HttpPut("{id:int}/cancel")]
-    public Task<AdminSubscriptionDto> Cancel(int id, [FromBody] CancelSubscriptionRequest request, CancellationToken cancellationToken) =>
+    public Task<AdminSubscriptionCancelDto> Cancel(int id, [FromBody] CancelSubscriptionRequest request, CancellationToken cancellationToken) =>
         subscriptionService.AdminCancelAsync(id, request, cancellationToken);
 }

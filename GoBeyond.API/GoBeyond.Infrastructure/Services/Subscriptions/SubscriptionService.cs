@@ -19,7 +19,7 @@ public interface ISubscriptionService
     Task<SubscriptionDto> CancelAsync(int clientUserId, int id, CancellationToken cancellationToken = default);
 
     Task<List<AdminSubscriptionDto>> GetAllAsync(SubscriptionSearchObject search, CancellationToken cancellationToken = default);
-    Task<AdminSubscriptionDto> AdminCancelAsync(int id, CancelSubscriptionRequest request, CancellationToken cancellationToken = default);
+    Task<AdminSubscriptionCancelDto> AdminCancelAsync(int id, CancelSubscriptionRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed class SubscriptionService(
@@ -109,10 +109,10 @@ public sealed class SubscriptionService(
                                      (x.MentorProfile.User.FirstName + " " + x.MentorProfile.User.LastName).Contains(term));
         if (search.Status is { } status) query = query.Where(x => x.Status == status);
 
-        return await query.OrderByDescending(x => x.CreatedAt).Select(AdminProjection).ToListAsync(cancellationToken);
+        return await query.OrderByDescending(x => x.CreatedAt).Select(AdminProjection<AdminSubscriptionDto>()).ToListAsync(cancellationToken);
     }
 
-    public async Task<AdminSubscriptionDto> AdminCancelAsync(int id, CancelSubscriptionRequest request, CancellationToken cancellationToken = default)
+    public async Task<AdminSubscriptionCancelDto> AdminCancelAsync(int id, CancelSubscriptionRequest request, CancellationToken cancellationToken = default)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.LockSubscriptionAsync(id, cancellationToken);
@@ -120,12 +120,17 @@ public sealed class SubscriptionService(
                            ?? throw new NotFoundException(DomainTexts.SubscriptionNotFound);
 
         // Plaćen zahtjev koji mentor nije prihvatio (AwaitingMentor) se vraća klijentu (neuspio povrat → 400 i ništa se ne
-        // mijenja); Active i PendingPayment ostaju bez povrata, kao kod otkazivanja klijenta.
-        await workflow.CancelAsync(subscription, request.Reason.Trim(), DateTime.UtcNow, notifyClient: true, notifyMentor: true,
-            CancelRefundFailed, cancellationToken);
+        // mijenja); Active i PendingPayment ostaju bez povrata, kao kod otkazivanja klijenta. Osporenu naplatu Stripe ne vraća,
+        // pa administrator dobija upozorenje.
+        var refunds = await workflow.CancelAsync(subscription, request.Reason.Trim(), DateTime.UtcNow, notifyClient: true,
+            notifyMentor: true, CancelRefundFailed, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return await db.Subscriptions.AsNoTracking().Where(x => x.Id == id).Select(AdminProjection).FirstAsync(cancellationToken);
+
+        var result = await db.Subscriptions.AsNoTracking().Where(x => x.Id == id)
+            .Select(AdminProjection<AdminSubscriptionCancelDto>()).FirstAsync(cancellationToken);
+        result.Warning = refunds.DisputeWarning(subscription.Currency);
+        return result;
     }
 
     public static QuestionnaireDto ToQuestionnaireDto(Questionnaire q) => new()
@@ -138,20 +143,25 @@ public sealed class SubscriptionService(
         OutsideActivity = q.OutsideActivity
     };
 
-    private static readonly System.Linq.Expressions.Expression<Func<Subscription, AdminSubscriptionDto>> AdminProjection = x => new AdminSubscriptionDto
-    {
-        Id = x.Id,
-        ClientFullName = x.ClientProfile.User.FirstName + " " + x.ClientProfile.User.LastName,
-        MentorFullName = x.MentorProfile.User.FirstName + " " + x.MentorProfile.User.LastName,
-        TrainingTypeName = x.MentorProfile.TrainingType.Name,
-        Status = x.Status,
-        Price = x.Price,
-        Currency = x.Currency,
-        CreatedAt = x.CreatedAt,
-        StartDate = x.StartDate,
-        EndDate = x.EndDate,
-        StatusReason = x.StatusReason
-    };
+    private static System.Linq.Expressions.Expression<Func<Subscription, T>> AdminProjection<T>() where T : AdminSubscriptionDto, new() =>
+        x => new T
+        {
+            Id = x.Id,
+            ClientFullName = x.ClientProfile.User.FirstName + " " + x.ClientProfile.User.LastName,
+            MentorFullName = x.MentorProfile.User.FirstName + " " + x.MentorProfile.User.LastName,
+            TrainingTypeName = x.MentorProfile.TrainingType.Name,
+            Status = x.Status,
+            Price = x.Price,
+            Currency = x.Currency,
+            CreatedAt = x.CreatedAt,
+            StartDate = x.StartDate,
+            EndDate = x.EndDate,
+            StatusReason = x.StatusReason,
+            Payments = x.Payments.OrderByDescending(p => p.CreatedAt).ThenByDescending(p => p.Id).Select(p => new PaymentItemDto
+            {
+                Amount = p.Amount, Currency = p.Currency, Purpose = p.Purpose, Status = p.Status, CreatedAt = p.CreatedAt, PaidAt = p.PaidAt
+            }).ToList()
+        };
 
     private async Task<SubscriptionDetailDto> OpenOrResumeAsync(int clientUserId, int clientProfileId, int mentorProfileId, decimal price,
         QuestionnaireRequest questionnaire, CancellationToken cancellationToken)

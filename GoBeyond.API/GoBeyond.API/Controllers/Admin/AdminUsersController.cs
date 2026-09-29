@@ -39,10 +39,8 @@ public sealed class AdminUsersController(IAdminUserService userService) : Contro
     public Task<AdminUserDto> Unblock(int id, CancellationToken cancellationToken) =>
         userService.UnblockAsync(id, cancellationToken);
 
+    /// <summary>Soft delete; <c>warning</c> navodi osporenu uplatu koja pri otkazivanju pretplata nije vraćena.</summary>
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
-    {
-        await userService.DeleteAsync(User.GetUserId(), id, cancellationToken);
-        return NoContent();
-    }
+    public Task<AdminDeleteUserResponse> Delete(int id, CancellationToken cancellationToken) =>
+        userService.DeleteAsync(User.GetUserId(), id, cancellationToken);
 }

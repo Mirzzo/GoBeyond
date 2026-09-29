@@ -82,7 +82,7 @@ public sealed class SessionInvalidationTests(GoBeyondApiFactory factory) : IClas
     {
         var session = await SecurityTestApi.RegisterClientAsync(factory, "sess_delete");
 
-        Assert.Equal(HttpStatusCode.NoContent, (await factory.ClientFor(TestUsers.Admin).DeleteAsync($"/api/admin/users/{session.User.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await factory.ClientFor(TestUsers.Admin).DeleteAsync($"/api/admin/users/{session.User.Id}")).StatusCode);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await SecurityTestApi.WithToken(factory, session.AccessToken).GetAsync(Me)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await SecurityTestApi.RefreshAsync(factory, session.RefreshToken)).StatusCode);

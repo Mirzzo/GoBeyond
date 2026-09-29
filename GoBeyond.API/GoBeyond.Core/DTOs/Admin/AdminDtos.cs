@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using GoBeyond.Core.DTOs.Profile;
+using GoBeyond.Core.DTOs.Subscriptions;
 using GoBeyond.Core.Enums;
 
 namespace GoBeyond.Core.DTOs.Admin;
@@ -116,7 +117,7 @@ public sealed class AdminClientDto
     public bool IsActive { get; set; }
 }
 
-public sealed class AdminSubscriptionDto
+public class AdminSubscriptionDto
 {
     public int Id { get; set; }
     public string ClientFullName { get; set; } = string.Empty;
@@ -129,7 +130,20 @@ public sealed class AdminSubscriptionDto
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public string? StatusReason { get; set; }
+
+    /// <summary>Uplate pretplate, od najnovije (status Disputed = naplata osporena kod banke klijenta, nije vraćena).</summary>
+    public List<PaymentItemDto> Payments { get; set; } = [];
 }
+
+/// <summary>Odgovor na admin otkazivanje: pretplata nakon otkazivanja i upozorenje o osporenoj uplati.</summary>
+public sealed class AdminSubscriptionCancelDto : AdminSubscriptionDto
+{
+    /// <summary>Tekst za administratora ako je ovo otkazivanje ostavilo osporenu uplatu nevraćenom, inače null.</summary>
+    public string? Warning { get; set; }
+}
+
+/// <summary>Odgovor na brisanje korisnika; <see cref="Warning"/> kao kod admin otkazivanja pretplate.</summary>
+public sealed record AdminDeleteUserResponse(string Message, string? Warning);
 
 public sealed class CancelSubscriptionRequest
 {

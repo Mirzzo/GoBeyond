@@ -125,6 +125,6 @@ public sealed class SubscriptionCancelTests : IDisposable
         Assert.Equal(PaymentStatus.Pending, Assert.Single(subscription.Payments).Status);
     }
 
-    private Task<AdminSubscriptionDto> AdminCancelAsync(int id) =>
+    private Task<AdminSubscriptionCancelDto> AdminCancelAsync(int id) =>
         _db.RunAsync(db => _db.Subscriptions(db).AdminCancelAsync(id, new CancelSubscriptionRequest { Reason = AdminReason }));
 }

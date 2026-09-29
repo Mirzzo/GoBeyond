@@ -23,7 +23,7 @@ public interface IAdminUserService
     Task<MessageResponse> ResetPasswordAsync(int id, ResetPasswordRequest request, CancellationToken cancellationToken = default);
     Task<AdminUserDto> BlockAsync(int adminUserId, int id, CancellationToken cancellationToken = default);
     Task<AdminUserDto> UnblockAsync(int id, CancellationToken cancellationToken = default);
-    Task DeleteAsync(int adminUserId, int id, CancellationToken cancellationToken = default);
+    Task<AdminDeleteUserResponse> DeleteAsync(int adminUserId, int id, CancellationToken cancellationToken = default);
 }
 
 public sealed class AdminUserService(
@@ -160,9 +160,10 @@ public sealed class AdminUserService(
     /// <summary>
     /// Soft delete. Za mentora: sve započete/aktivne saradnje se prekidaju (klijent dobija obavijest,
     /// više se ništa ne naplaćuje ni obnavlja), a planovi ostaju dostupni klijentima samo za čitanje.
-    /// Uplate za neprihvaćene zahtjeve (AwaitingMentor) se vraćaju; ako povrat ne uspije, brisanje se ne izvršava.
+    /// Uplate za neprihvaćene zahtjeve (AwaitingMentor) se vraćaju; ako povrat ne uspije, brisanje se ne izvršava. Naplata
+    /// osporena kod banke klijenta se ne vraća (Disputed), a odgovor tada nosi upozorenje za administratora.
     /// </summary>
-    public async Task DeleteAsync(int adminUserId, int id, CancellationToken cancellationToken = default)
+    public async Task<AdminDeleteUserResponse> DeleteAsync(int adminUserId, int id, CancellationToken cancellationToken = default)
     {
         if (id == adminUserId) throw new ValidationException("Ne možete obrisati vlastiti nalog.");
         var now = DateTime.UtcNow;
@@ -188,15 +189,16 @@ public sealed class AdminUserService(
             .Where(x => subscriptionIds.Contains(x.Id) && QueryExtensions.OpenStatuses.Contains(x.Status))
             .ToListAsync(cancellationToken);
 
+        RefundOutcome refunds = default;
         foreach (var subscription in subscriptions)
         {
             var mentorRemoved = subscription.MentorProfile.UserId == id;
             // Uplate neprihvaćenog zahtjeva (AwaitingMentor) se vraćaju i klijent to vidi u obavijesti. Neuspio povrat prekida
             // brisanje (transakcija se poništava); ponovni pokušaj koristi isti Stripe Idempotency-Key, pa se već izvršeni
             // povrat ne ponavlja. Mentor dobija obavijest samo o zahtjevu koji je vidio (ne o neplaćenoj PendingPayment).
-            await workflow.CancelAsync(subscription,
+            refunds = refunds.Plus(await workflow.CancelAsync(subscription,
                 mentorRemoved ? DomainTexts.MentorRemovedReason : DomainTexts.ClientRemovedReason,
-                now, notifyClient: mentorRemoved, notifyMentor: !mentorRemoved, DeleteRefundFailed, cancellationToken);
+                now, notifyClient: mentorRemoved, notifyMentor: !mentorRemoved, DeleteRefundFailed, cancellationToken));
         }
 
         user.IsDeleted = true;
@@ -204,6 +206,10 @@ public sealed class AdminUserService(
         await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
+        // Osporenu naplatu Stripe ne vraća, pa administrator dobija upozorenje (kao kod admin otkazivanja pretplate).
+        var currency = subscriptions.Select(x => x.Currency).FirstOrDefault() ?? string.Empty;
+        return new AdminDeleteUserResponse($"Korisnik {user.FullName} je obrisan.", refunds.DisputeWarning(currency));
     }
 
     /// <summary>

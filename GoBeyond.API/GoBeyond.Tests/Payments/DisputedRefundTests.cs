@@ -1,6 +1,10 @@
 using GoBeyond.Core.DTOs.Admin;
 using GoBeyond.Core.Enums;
 using GoBeyond.Core.Exceptions;
+using GoBeyond.Infrastructure.Database;
+using GoBeyond.Infrastructure.Security;
+using GoBeyond.Infrastructure.Services.Admin;
+using GoBeyond.Infrastructure.Services.Users;
 using GoBeyond.Tests.Subscriptions;
 
 namespace GoBeyond.Tests.Payments;
@@ -14,6 +18,9 @@ public sealed class DisputedRefundTests : IDisposable
 {
     private const string DisputedSentence =
         "Uplata od 29,99 USD je osporena kod vaše banke, pa se ne vraća automatski. O povratu odlučuje postupak osporavanja.";
+
+    private const string AdminDisputeWarning =
+        "Uplata od 29,99 USD je osporena kod banke klijenta i nije vraćena; ishod rješava postupak osporavanja na Stripe-u.";
 
     private readonly SubscriptionTestDatabase _db = new();
 
@@ -116,6 +123,9 @@ public sealed class DisputedRefundTests : IDisposable
             new CancelSubscriptionRequest { Reason = "Mentor ne odgovara na zahtjev" }));
 
         Assert.Equal(SubscriptionStatus.Cancelled, result.Status);
+        Assert.Equal(AdminDisputeWarning, result.Warning);
+        Assert.Equal([(29.99m, PaymentStatus.Disputed), (12.50m, PaymentStatus.Refunded)],
+            result.Payments.Select(x => (x.Amount, x.Status)).OrderByDescending(x => x.Amount));
         Assert.Equal([("pi_duplicate", "refund:pi_duplicate")], _db.Gateway.Refunds);
         var payments = (await _db.SubscriptionAsync(id)).Payments.OrderBy(x => x.Id).Select(x => x.Status);
         Assert.Equal([PaymentStatus.Disputed, PaymentStatus.Refunded], payments);
@@ -123,6 +133,72 @@ public sealed class DisputedRefundTests : IDisposable
         Assert.Equal("Saradnja sa mentorom Selma Delić je prekinuta. Razlog: Mentor ne odgovara na zahtjev. " +
                      "Uplaćeni iznos od 12,50 USD biće vraćen na vašu karticu. " + DisputedSentence, client.Body);
         Assert.Single(await _db.NotificationsAsync(_db.MentorUser.Id));
+    }
+
+    [Fact]
+    public async Task AdminCancel_WithARefundOrAnEarlierDispute_HasNoWarning()
+    {
+        // Duplikat je osporen ranije (i vidi se u uplatama pretplate); ovo otkazivanje je vratilo plaćeni zahtjev.
+        var id = await _db.AddSubscriptionAsync(SubscriptionStatus.AwaitingMentor);
+        await _db.AddPaymentAsync(id, "pi_paid", PaymentStatus.Succeeded, "succeeded");
+        await _db.AddPaymentAsync(id, "pi_earlier_dispute", PaymentStatus.Disputed, "succeeded", amount: 12.50m);
+
+        var result = await _db.RunAsync(db => _db.Subscriptions(db).AdminCancelAsync(id,
+            new CancelSubscriptionRequest { Reason = "Mentor ne odgovara na zahtjev" }));
+
+        Assert.Null(result.Warning);
+        Assert.Equal([(29.99m, PaymentStatus.Refunded), (12.50m, PaymentStatus.Disputed)],
+            result.Payments.Select(x => (x.Amount, x.Status)).OrderByDescending(x => x.Amount));
+    }
+
+    // Klijent je platio osporenom karticom, a confirm nije stigao: otkazivanje zatvara nedovršenu uplatu i ne može je vratiti.
+    [Fact]
+    public async Task AdminCancel_OfPendingPaymentWhoseChargedIntentIsDisputed_WarnsTheAdmin()
+    {
+        var id = await _db.AddSubscriptionAsync(SubscriptionStatus.PendingPayment);
+        await _db.AddPaymentAsync(id, "pi_disputed", PaymentStatus.Pending, "succeeded");
+        _db.Gateway.DisputedCharges.Add("pi_disputed");
+
+        var result = await _db.RunAsync(db => _db.Subscriptions(db).AdminCancelAsync(id,
+            new CancelSubscriptionRequest { Reason = "Dvostruka registracija klijenta" }));
+
+        Assert.Equal(SubscriptionStatus.Cancelled, result.Status);
+        Assert.Equal(AdminDisputeWarning, result.Warning);
+        Assert.Equal(PaymentStatus.Disputed, Assert.Single(result.Payments).Status);
+    }
+
+    [Fact]
+    public async Task DeletingAMentor_WhoseRequestsHaveDisputedCharges_WarnsTheAdmin()
+    {
+        var first = await _db.AddSubscriptionAsync(SubscriptionStatus.AwaitingMentor);
+        await _db.AddPaymentAsync(first, "pi_disputed_1", PaymentStatus.Succeeded, "succeeded");
+        var second = await _db.AddSubscriptionAsync(SubscriptionStatus.AwaitingMentor, clientProfileId: _db.SecondClientProfileId);
+        await _db.AddPaymentAsync(second, "pi_disputed_2", PaymentStatus.Succeeded, "succeeded", amount: 15.00m);
+        _db.Gateway.DisputedCharges.UnionWith(["pi_disputed_1", "pi_disputed_2"]);
+
+        var response = await _db.RunAsync(db => DeleteUserAsync(db, _db.MentorUser.Id));
+
+        Assert.Equal("Korisnik Selma Delić je obrisan.", response.Message);
+        Assert.Equal("Osporene uplate od ukupno 44,99 USD nisu vraćene; ishod rješava postupak osporavanja na Stripe-u.",
+            response.Warning);
+        Assert.Equal(PaymentStatus.Disputed, Assert.Single((await _db.SubscriptionAsync(second)).Payments).Status);
+    }
+
+    [Fact]
+    public async Task DeletingAClient_WhoseRequestChargeIsDisputed_WarnsTheAdmin_AndWithoutADispute_DoesNot()
+    {
+        var disputed = await _db.AddSubscriptionAsync(SubscriptionStatus.AwaitingMentor);
+        await _db.AddPaymentAsync(disputed, "pi_disputed", PaymentStatus.Succeeded, "succeeded");
+        _db.Gateway.DisputedCharges.Add("pi_disputed");
+        var refunded = await _db.AddSubscriptionAsync(SubscriptionStatus.AwaitingMentor, clientProfileId: _db.SecondClientProfileId);
+        await _db.AddPaymentAsync(refunded, "pi_paid", PaymentStatus.Succeeded, "succeeded");
+
+        var withDispute = await _db.RunAsync(db => DeleteUserAsync(db, _db.ClientUser.Id));
+        var withoutDispute = await _db.RunAsync(db => DeleteUserAsync(db, _db.SecondClientUser.Id));
+
+        Assert.Equal(("Korisnik Nađa Škrijelj je obrisan.", AdminDisputeWarning), (withDispute.Message, withDispute.Warning));
+        Assert.Equal(("Korisnik Hana Kurić je obrisan.", (string?)null), (withoutDispute.Message, withoutDispute.Warning));
+        Assert.Equal(PaymentStatus.Refunded, Assert.Single((await _db.SubscriptionAsync(refunded)).Payments).Status);
     }
 
     [Fact]
@@ -159,4 +235,7 @@ public sealed class DisputedRefundTests : IDisposable
                      "nije u odgovarajućem statusu (Otkazana). Uplata je osporena kod vaše banke, pa se ne vraća automatski. " +
                      "O povratu odlučuje postupak osporavanja.", notice.Body);
     }
+
+    private Task<AdminDeleteUserResponse> DeleteUserAsync(GoBeyondDbContext db, int userId) =>
+        new AdminUserService(db, new UserAccountValidator(db), new PasswordHasher(), _db.Workflow(db)).DeleteAsync(adminUserId: 0, userId);
 }
