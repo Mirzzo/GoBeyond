@@ -45,6 +45,17 @@ class Formatters {
 
   static String monthName(int month) => monthNames[(month - 1).clamp(0, 11)];
 
+  /// Bosnian plural rule: 1, 21, 31... -> [one]; 2-4, 22-24... -> [few];
+  /// everything else (0, 5-20, 25-30...) -> [many]. Also covers "godine"/
+  /// "dani" wherever a count needs to agree with a noun.
+  static String plural(int n, String one, String few, String many) {
+    final mod10 = n % 10;
+    final mod100 = n % 100;
+    if (mod10 == 1 && mod100 != 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
+  }
+
   static String price(num amount, String? currency) {
     final value = amount.toStringAsFixed(2);
     // The backend returns the currency code lowercased (e.g. "usd").

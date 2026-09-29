@@ -63,7 +63,7 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
     return _MentorDetailData(
       mentor: results[0] as MentorDetail,
       similar: results[1] as List<MentorSummary>,
-      hasBlockingSubscription: blocking.isNotEmpty,
+      blockingStatus: blocking.isNotEmpty ? blocking.first.status : null,
     );
   }
 
@@ -133,7 +133,8 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
               const SizedBox(height: 4),
               Center(
                 child: Text(
-                    '${mentor.reviewCount} recenzija · ${mentor.yearsOfExperience} god. iskustva',
+                    '${mentor.reviewCount} ${Formatters.plural(mentor.reviewCount, 'recenzija', 'recenzije', 'recenzija')} · '
+                    '${mentor.yearsOfExperience} god. iskustva',
                     style: const TextStyle(
                         color: AppTheme.textMuted, fontSize: 12.5)),
               ),
@@ -192,18 +193,20 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
                     separatorBuilder: (_, __) => const SizedBox(width: 12),
                     itemBuilder: (context, index) {
                       final similar = data.similar[index];
-                      return _SimilarMentorCard(mentor: similar);
+                      return _SimilarMentorCard(
+                        mentor: similar,
+                        currentMentorProfileId: widget.mentorProfileId,
+                      );
                     },
                   ),
                 ),
               ],
               const SizedBox(height: 24),
-              if (data.hasBlockingSubscription)
+              if (data.blockingStatus != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Text(
-                    'Već imate aktivnu ili započetu saradnju sa mentorom. '
-                    'Otkažite postojeću pretplatu prije nego odaberete novog mentora.',
+                    _blockingMessage(data.blockingStatus!),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                         color: AppTheme.textMuted, fontSize: 12.5),
@@ -212,7 +215,7 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
               PrimaryButton(
                 label:
                     'KUPI PLAN ${Formatters.price(mentor.monthlyPrice, mentor.currency)}',
-                onPressed: data.hasBlockingSubscription
+                onPressed: data.blockingStatus != null
                     ? null
                     : () => Navigator.of(context).push(
                           MaterialPageRoute(
@@ -229,16 +232,33 @@ class _MentorDetailScreenState extends State<MentorDetailScreen> {
   }
 }
 
+/// An AwaitingMentor subscription is already paid (the Initial payment moves
+/// it out of PendingPayment) and the client cannot cancel it while the
+/// mentor decides, so its text says to wait for the mentor's answer. A
+/// PendingPayment (not paid yet) or Active subscription can be cancelled by
+/// the client, so for those the text says to cancel it first.
+String _blockingMessage(String status) {
+  if (status == 'AwaitingMentor') {
+    return 'Vaš zahtjev kod mentora još čeka odgovor. Novog mentora možete '
+        'odabrati kada mentor odgovori na zahtjev.';
+  }
+  return 'Već imate aktivnu ili započetu saradnju sa mentorom. '
+      'Otkažite postojeću pretplatu prije nego odaberete novog mentora.';
+}
+
 class _MentorDetailData {
   const _MentorDetailData({
     required this.mentor,
     required this.similar,
-    required this.hasBlockingSubscription,
+    required this.blockingStatus,
   });
 
   final MentorDetail mentor;
   final List<MentorSummary> similar;
-  final bool hasBlockingSubscription;
+
+  /// The status of the client's blocking subscription with another mentor
+  /// (PendingPayment/AwaitingMentor/Active), or null if there is none.
+  final String? blockingStatus;
 }
 
 class _ReviewTile extends StatelessWidget {
@@ -286,9 +306,11 @@ class _ReviewTile extends StatelessWidget {
 }
 
 class _SimilarMentorCard extends StatelessWidget {
-  const _SimilarMentorCard({required this.mentor});
+  const _SimilarMentorCard(
+      {required this.mentor, required this.currentMentorProfileId});
 
   final MentorSummary mentor;
+  final int currentMentorProfileId;
 
   @override
   Widget build(BuildContext context) {
@@ -297,7 +319,11 @@ class _SimilarMentorCard extends StatelessWidget {
       child: AppPanel(
         padding: const EdgeInsets.all(10),
         onTap: () {
-          Navigator.of(context).pushReplacement(
+          // Push (not pushReplacement) so Back returns to this mentor's
+          // detail screen instead of skipping past it to the list; skip the
+          // navigation entirely if the card points back at this same mentor.
+          if (mentor.mentorProfileId == currentMentorProfileId) return;
+          Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) =>
                   MentorDetailScreen(mentorProfileId: mentor.mentorProfileId),
