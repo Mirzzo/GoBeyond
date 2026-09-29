@@ -109,9 +109,25 @@ Napomena: u sandboxu agenata `flutter build windows` je padao zbog symlinkova za
 
 Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498b` backend · `cb668ed` desktop · `edffca2` mobile · `a5faae2` plaćanja · `0008fa5` mobile biblioteke · `d31394a` desktop certifikati · `b17bf33` + `516c915` privatni certifikati · `38b60ac` README · + docs.
 
+## Sesija 3 (29.09.2026.) — Stripe podešavanje
+
+- Korisnik je dao Stripe TEST ključeve. Upisani su u root `.env` (gitignored, NE commitati). Ključ provjeren: test mod, valuta računa EUR, naplata ide u USD.
+- Podjela: `stripe-backend` (Opus) — end-to-end provjera sa pravim Stripe-om (uspješno, odbijena kartica, 3DS, refund pri odbijanju, produženje, kasna uplata → auto-refund, idempotency, webhook preko Stripe CLI), popravke + testovi, preporuka za valutu. `stripe-mobile` (Sonnet) — review PaymentSheet integracije (returnURL/3DS na Androidu, obrada grešaka, prikaz cijena), live provjera create-intent odgovora.
+- Pravilo reviewa: ocjena mora biti veća od 8, inače se vraća na doradu.
+- Korisnik je odobrio gašenje svog lokalnog `dotnet run` API-ja (bez ključeva, preklapao je Docker na IPv4 portu 5000).
+- stripe-mobile **8.5/10 — prihvaćeno** (commit `bf2783c`): cijena na PRETPLATI SE ispravljena, 409 odgovori više ne zaglave korisnika, sve Stripe greške mapirane na bosanski, tamna tema PaymentSheet-a, labele za Failed/RefundPending. 3DS na Androidu ne traži returnURL (potvrđeno iz izvora flutter_stripe 13.1 — samo kartice). Live: create-intent vraća pk_test + clientSecret. 27 testova. Ostaje: pravi test na Android uređaju.
+- Naknadni nalaz glavnog agenta: mobile test `payment_intent_parsing_test.dart` je sadržavao stvarni publishable ključ i client_secret iz live provjere. Zamijenjeno placeholderima i commit dopunjen (amend, nije bio pushan) → `cbc7716`. U nepushanim commitima nema stvarnih Stripe vrijednosti.
+- stripe-backend **9.5/10 — prihvaćeno** (commit `de07c0f`). Svi scenariji protiv pravog Stripe test moda prolaze: uspjeh, odbijena kartica, 3DS, refund pri odbijanju, produženje +30 dana, kasna uplata → auto-refund, idempotency, webhook (Stripe CLI), izvještaji. Popravljena 4 stvarna buga:
+  1. idempotency ključevi se sudaraju nakon reseta baze / na drugoj instalaciji;
+  2. `charge_already_refunded` blokirao odbijanje;
+  3. webhook `payment_failed` pogrešno označavao uplatu Failed;
+  4. naplaćena a nepotvrđena uplata bez webhooka → sada automatsko usklađivanje (primijeni ili refundiraj).
+  Dodano čitanje root `.env` pri lokalnom pokretanju (ne gazi Docker varijable). 148 testova. Preporuka: valuta ostaje USD (konverzija u EUR ~2% naknade, min. iznos OK).
+- README ažuriran (Stripe sekcija, testne kartice, webhook opcionalno, `.env` i za lokalno pokretanje).
+
 ## Sljedeći koraci (korisnik)
 
-1. **Stripe TEST ključevi** u `.env` (`Payments__SecretKey`, `Payments__PublishableKey`) da plaćanje radi. Ocjenjivač mora moći platiti bez intervencije, pa odlučiti kako mu dostaviti ključeve. Ključevi se ne smiju commitati u javni repo osim ako je to svjesna odluka (samo TEST ključevi).
+1. **Stripe ključevi za ocjenjivača:** ključevi su lokalno u `.env` (29.09.2026.), ali `.env` se ne commituje. Treba odlučiti kako ih ocjenjivač dobija (npr. `.env` u zip-u sa lozinkom, ili prema uputama za predaju).
 2. **Windows Developer Mode** (Settings → System → For developers) — preporučeno ako `flutter run -d windows` javi grešku o symlinkovima (release build je 29.09. uspio i bez njega).
 3. **Android emulator test** mobilne aplikacije (na ovoj mašini nema Android SDK-a): posebno Stripe PaymentSheet (flutter_stripe 13.1), upload slika, navigacija.
 4. Ručno proći desktop tokove (plan builder, izvještaji PDF/print) u buildanoj aplikaciji.

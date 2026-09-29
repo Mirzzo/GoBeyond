@@ -22,7 +22,7 @@ Lozinka za sve naloge je `test`.
 
 Prijava radi sa korisničkim imenom ili email adresom. U bazi postoje i drugi seed korisnici (mentori po vrstama treninga, mentori koji čekaju odobrenje, klijenti u raznim statusima pretplate), svi sa lozinkom `test`.
 
-**Stripe testna kartica:** `4242 4242 4242 4242`, bilo koji budući datum, bilo koji CVC i poštanski broj.
+**Stripe testne kartice:** vidi [Stripe ključevi](#2-stripe-ključevi-plaćanje-pretplate).
 
 ## Pokretanje
 
@@ -54,7 +54,25 @@ Plaćanje ide preko Stripe-a u TEST modu. Ključevi se ne nalaze u kodu.
 2. Upišite `Payments__SecretKey` (`sk_test_...`) i `Payments__PublishableKey` (`pk_test_...`) sa https://dashboard.stripe.com/test/apikeys.
 3. Pokrenite `docker compose up -d` ponovo.
 
-Mobilna aplikacija publishable ključ dobija od API-ja, pa se ne podešava u Flutteru. Bez ključeva sve ostalo radi, a pokušaj plaćanja vraća poruku "Stripe plaćanje nije konfigurisano na serveru."
+Isti `.env` čitaju i API i `GoBeyond.EmailConsumer` kad se pokreću lokalno (`dotnet run`, Visual Studio, VS Code). Varijable koje su već postavljene (docker-compose, `launchSettings.json`) imaju prednost. Mobilna aplikacija publishable ključ dobija od API-ja, pa se ne podešava u Flutteru. Bez ključeva sve ostalo radi, a pokušaj plaćanja vraća poruku "Stripe plaćanje nije konfigurisano na serveru."
+
+**Testne kartice** (bilo koji budući datum, bilo koji CVC i poštanski broj):
+
+| Kartica | Rezultat |
+|---|---|
+| `4242 4242 4242 4242` | uspješno plaćanje |
+| `4000 0025 0000 3155` | traži 3D Secure potvrdu (u testnom prozoru potvrdite autentifikaciju) |
+| `4000 0000 0000 9995` | odbijena kartica; u istom prozoru možete unijeti drugu karticu |
+
+Nakon plaćanja aplikacija poziva `POST /api/payments/{id}/confirm`, a backend provjerava uplatu na Stripe-u. Webhook nije obavezan. Ako potvrda ne stigne (npr. aplikacija se ugasi), API za nekoliko minuta sam provjeri uplatu na Stripe-u i primijeni je, ili je vrati ako je pretplata u međuvremenu otkazana.
+
+Opcionalno, webhook preko Stripe CLI:
+
+```bash
+stripe listen --events payment_intent.succeeded,payment_intent.payment_failed,payment_intent.canceled --forward-to http://localhost:5000/api/payments/webhook
+```
+
+Ispisani `whsec_...` upišite kao `Payments__WebhookSecret` u `.env` i pokrenite `docker compose up -d`.
 
 ### 3. Desktop aplikacija (Windows)
 
@@ -64,7 +82,7 @@ flutter pub get
 flutter run -d windows --dart-define=GO_BEYOND_API_URL=http://localhost:5000
 ```
 
-Flutter na Windowsu za pluginove traži uključen **Developer Mode** (Settings → System → For developers).
+Ako `flutter run` javi grešku o symlinkovima ("Building with plugins requires symlink support"), uključite **Developer Mode** (Settings → System → For developers).
 
 ### 4. Mobilna aplikacija (Android emulator)
 
@@ -79,7 +97,7 @@ flutter run --dart-define=GO_BEYOND_API_URL=http://10.0.2.2:5000
 ## Konfiguracija
 
 - Sva konfiguracija backenda i pomoćnog servisa je na jednom mjestu: `appsettings.Shared.json`. To su konekcijski string, JWT, RabbitMQ, SMTP, Stripe, intervali obavijesti i ograničenja uploada.
-- Vrijednosti se mogu pregaziti environment varijablama u formatu `Sekcija__Kljuc`, preko `.env` fajla ili `docker-compose.yml`. U `docker-compose.yml` su pregažena samo host imena Docker servisa.
+- Vrijednosti se mogu pregaziti environment varijablama u formatu `Sekcija__Kljuc`, preko `.env` fajla (čitaju ga docker-compose i lokalno pokretanje) ili `docker-compose.yml`. U `docker-compose.yml` su pregažena samo host imena Docker servisa.
 - Flutter aplikacije adresu API-ja čitaju iz `--dart-define=GO_BEYOND_API_URL=...`.
 
 ## Arhitektura
