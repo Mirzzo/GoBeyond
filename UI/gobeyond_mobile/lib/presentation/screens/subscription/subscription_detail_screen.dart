@@ -173,9 +173,10 @@ class _SubscriptionDetailBody extends StatelessWidget {
     );
   }
 
-  // `Payment.status` (api-contract.md §1 + v1.2 changelog): Pending,
-  // Succeeded, Failed, Refunded, RefundPending. Any value not in that list
-  // is a future/unrecognized status the backend may add later - shown
+  // `Payment.status` (api-contract.md §1 + changelog): Pending, Succeeded,
+  // Failed, Refunded, RefundPending, Disputed (the charge was disputed at
+  // the client's bank, so it is not refunded automatically). Any other
+  // value is a future/unrecognized status the backend may add later - shown
   // as-is rather than mislabeled "Na čekanju" (contract: "UI mora podržati
   // nepoznate/nove vrijednosti").
   String _paymentStatusLabel(String status) {
@@ -190,6 +191,8 @@ class _SubscriptionDetailBody extends StatelessWidget {
         return 'Refundirano';
       case 'RefundPending':
         return 'Povrat novca u obradi';
+      case 'Disputed':
+        return 'Osporeno';
       default:
         return status;
     }
@@ -204,6 +207,8 @@ class _SubscriptionDetailBody extends StatelessWidget {
       case 'Refunded':
       case 'RefundPending':
         return Icons.undo_rounded;
+      case 'Disputed':
+        return Icons.gavel_rounded;
       default:
         return Icons.hourglass_top_rounded;
     }
@@ -215,6 +220,8 @@ class _SubscriptionDetailBody extends StatelessWidget {
         return AppTheme.success;
       case 'Failed':
         return AppTheme.danger;
+      case 'Disputed':
+        return AppTheme.accent;
       default:
         return AppTheme.textMuted;
     }
