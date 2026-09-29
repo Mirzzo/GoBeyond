@@ -74,14 +74,16 @@ public sealed class TrainingPlanService(
     public async Task<PlanDetailDto> CreateAsync(int mentorUserId, CreatePlanRequest request, CancellationToken cancellationToken = default)
     {
         // Kreiranje može prihvatiti zahtjev, pa se pretplata zaključava prije čitanja: istovremeno odbijanje ili otkazivanje
-        // se završi prije, a ovdje se vidi njegov rezultat (400) umjesto konflikta pri snimanju.
+        // se završi prije, a ovdje se vidi njegov rezultat (400) umjesto konflikta pri snimanju. Pretplata koju klijent nikad
+        // nije platio za mentora ne postoji (404, kao na ostalim mentorskim rutama), bez obzira na njen status.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.LockSubscriptionAsync(request.SubscriptionId, cancellationToken);
         var subscription = await db.Subscriptions
             .Include(x => x.ClientProfile).ThenInclude(x => x.User)
             .Include(x => x.MentorProfile).ThenInclude(x => x.User)
             .Include(x => x.TrainingPlan)
-            .FirstOrDefaultAsync(x => x.Id == request.SubscriptionId && x.MentorProfile.UserId == mentorUserId, cancellationToken)
+            .FirstOrDefaultAsync(x => x.Id == request.SubscriptionId && x.MentorProfile.UserId == mentorUserId && x.PaidAt != null,
+                cancellationToken)
             ?? throw new NotFoundException(DomainTexts.SubscriptionNotFound);
 
         if (subscription.TrainingPlan is not null)

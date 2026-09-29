@@ -7,7 +7,9 @@ using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Services.Mentors;
 using GoBeyond.Infrastructure.Services.Notifications;
 using GoBeyond.Infrastructure.Services.Payments;
+using GoBeyond.Infrastructure.Services.Plans;
 using GoBeyond.Infrastructure.Services.Subscriptions;
+using GoBeyond.Infrastructure.StateMachineServices.TrainingPlans;
 using GoBeyond.Tests.Payments;
 using GoBeyond.Tests.TestInfrastructure;
 using Microsoft.Data.Sqlite;
@@ -72,6 +74,10 @@ internal sealed class SubscriptionTestDatabase : IDisposable
         new(db, Gateway, Workflow(db), Subscriptions(db), Options.Create(Lifecycle), NullLogger<PaymentService>.Instance);
 
     public CollaborationService Collaboration(GoBeyondDbContext db) => new(db, Workflow(db));
+
+    public TrainingPlanService Plans(GoBeyondDbContext db) => new(db,
+        new TrainingPlanStateFactory([new DraftTrainingPlanState(), new PublishedTrainingPlanState(), new ArchivedTrainingPlanState()]),
+        Workflow(db), new NotificationSender(db), Options.Create(Lifecycle));
 
     public SubscriptionLifecycleProcessor LifecycleProcessor(GoBeyondDbContext db) =>
         new(db, Workflow(db), new NotificationSender(db), Payments(db), Options.Create(Lifecycle),

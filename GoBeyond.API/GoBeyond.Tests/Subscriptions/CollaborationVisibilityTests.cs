@@ -1,7 +1,9 @@
+using GoBeyond.Core.DTOs.Plans;
 using GoBeyond.Core.DTOs.Subscriptions;
 using GoBeyond.Core.Enums;
 using GoBeyond.Core.Exceptions;
 using GoBeyond.Core.SearchObjects;
+using GoBeyond.Infrastructure.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace GoBeyond.Tests.Subscriptions;
@@ -37,6 +39,31 @@ public sealed class CollaborationVisibilityTests : IDisposable
             await Assert.ThrowsAsync<NotFoundException>(() => _db.RunAsync(db => _db.Collaboration(db).GetSubscriberAsync(_db.MentorUser.Id, id)));
         }
         Assert.Equal(paid, (await _db.RunAsync(db => _db.Collaboration(db).GetSubscriberAsync(_db.MentorUser.Id, paid))).SubscriptionId);
+    }
+
+    [Fact]
+    public async Task CreatingAPlanForANeverPaidSubscription_AnswersAsForANonexistentOne()
+    {
+        var pendingUnpaid = await _db.AddSubscriptionAsync(SubscriptionStatus.PendingPayment);
+        var cancelledUnpaid = await _db.AddSubscriptionAsync(SubscriptionStatus.Cancelled, x => x.PaidAt = null,
+            clientProfileId: _db.SecondClientProfileId);
+        var otherMentors = await _db.AddSubscriptionAsync(SubscriptionStatus.Active, mentorProfileId: _db.SecondMentorProfileId,
+            clientProfileId: _db.SecondClientProfileId);
+        // Kontrola: plaćen i zatim otkazan zahtjev je mentor vidio, pa dobija razlog odbijanja.
+        var cancelledPaid = await _db.AddSubscriptionAsync(SubscriptionStatus.Cancelled, clientProfileId: _db.SecondClientProfileId);
+
+        Task<PlanDetailDto> CreatePlanAsync(int subscriptionId) => _db.RunAsync(db =>
+            _db.Plans(db).CreateAsync(_db.MentorUser.Id, new CreatePlanRequest { SubscriptionId = subscriptionId }));
+
+        foreach (var id in new[] { pendingUnpaid, cancelledUnpaid, otherMentors, 999_999 })
+        {
+            var notFound = await Assert.ThrowsAsync<NotFoundException>(() => CreatePlanAsync(id));
+            Assert.Equal(DomainTexts.SubscriptionNotFound, notFound.Message);
+        }
+        var invalid = await Assert.ThrowsAsync<ValidationException>(() => CreatePlanAsync(cancelledPaid));
+        Assert.Equal("Plan se može kreirati samo za aktivnu saradnju.", invalid.Message);
+        Assert.False(await _db.RunAsync(db => db.TrainingPlans.AnyAsync()));
+        Assert.Equal(SubscriptionStatus.PendingPayment, (await _db.SubscriptionAsync(pendingUnpaid)).Status);
     }
 
     [Fact]
