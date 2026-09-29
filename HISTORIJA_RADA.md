@@ -177,7 +177,44 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
 | M1 mobile (Sonnet) | 7.5 | **7.5/10** | DORADA — "Obimi je obavezni" (mora "su"), chat polling u pozadini (i označava pročitano), testovi koji ne čuvaju popravku (lokalizacija, DOB), test za zonu, raspored dugmadi na Pretplati, sitnice |
 - Master nakon spajanja: backend 373/373, desktop analyze čist + 76/76. Ugovor v1.7.
 - **Deploy:** korisnik je dozvolio rebuild (`.claude/settings.local.json`: samo `docker compose up -d --build`). API rebuildan, migracije `SubscriptionConsistency` i `AddUserSecurityStamp` primijenjene na bazu 210020 (korisnikov nalog i podaci netaknuti). Email-consumer se rebuilda nakon E1.
-- U toku: runda 3 (E1, M1) i regresijski retest backenda na glavnom stacku (3 testera, QA nalozi).
+- Runda 3 (E1, M1) i dva od tri retestera prekinuti su session limitom. Korisnik je nakon toga ugasio Docker i emulator. Glavni agent je podigao stack (`docker compose up -d`) i emulator, obrisao zaostalu bazu `210020_revb2` i queue `gobeyond.revb2.notifications`, pa pokrenuo nastavak: E1 i M1 nastavljaju od necommitovanog rada u svojim worktree-ovima, a rt-payments i rt-notifications od svojih skripti i stanja u scratchu.
+
+### Regresijski retest backenda (glavni stack nakon deploya)
+- **rt-security-features** (završen): od 17 nalaza iz runde 1 popravljeno je 16. Supresiju poddomena nije bilo moguće retestirati jer je email-consumer i dalje stara verzija. Svih 15 test slučajeva koji su pali u rundi 1 sada prolazi (AUTH-09/18/21/24/25, SEC-14/18, PLN-02/09, PRG-01, REV-03, ADM-04/05/08/10). Happy path prolazi (registracija → plaćanje `pm_card_visa` → prihvatanje → plan 7 dana → trening → napredak → poruke → recenzija).
+- Novi nalazi, idu u fix grupu **B5**:
+  - istovremene promjene lozinke nisu serijalizovane: admin reset može biti pregažen, a dvije vlastite promjene mogu završiti deadlockom (500);
+  - ime i prezime, te nazivi šifarnika, validiraju se prije trim-a (`'A     '` se snimi kao `'A'`);
+  - razlog odbijanja mentora nema završnu tačku;
+  - ocjena u razlogu preporuke ima decimalnu tačku `(4.0)`.
+- **rt-payments** (završen nakon nastavka):
+  - Od 27 nalaza 26 je popravljeno; 1 nije bio bug (zarada obrisanih mentora u izvještaju).
+  - Svi Stripe objekti provjereni su na strani servera:
+    - jedna otvorena pretplata i pri paralelnim zahtjevima;
+    - jedan ishod za accept/reject i confirm/cancel;
+    - admin otkazivanje vraća novac, a tekst navodi iznos;
+    - zastarjeli intent je otkazan na Stripe-u;
+    - neuspjele (Failed) uplate se usklađuju;
+    - paralelni `create-intent` vraćaju isti PaymentIntent;
+    - Stripe timeout vraća 400 i ne gasi host;
+    - produženje plaćeno prije isteka računa se od starog kraja.
+  - Nakon restarta stacka nema duplih podsjetnika ni duplih povrata.
+  - U 261 obavijesti i 367 emailova nema `..` niti decimalne tačke.
+- **rt-notifications** (završen):
+  - Svih 12 API nalaza je popravljeno ili je ponašanje ispravno po ugovoru. 5 nalaza za email-consumer čeka njegov rebuild.
+  - Na glavnom stacku ponovo je potvrđen lifecycle nakon restarta: istek jednom, podsjetnik pred istek jednom, produženje ga resetuje, "plan nedostaje" jednom.
+- Novi nalazi, idu u fix grupu **B6**:
+  - (minor) pretplata dobije novu cijenu iako je stari intent već plaćen;
+  - (trivial) povrat koji Stripe trajno odbije (osporena uplata) ponavlja se beskonačno;
+  - (trivial) NewMessage obavijesti dva pošiljaoca s istim imenom se spajaju;
+  - (trivial) kreiranje plana za neplaćenu pretplatu vraća 400 umjesto 404;
+  - (trivial) desktop dijalog otkazivanja kaže da se obavještava i mentor kod neplaćene pretplate.
+  - Nalaz o razlogu odbijanja mentora bez tačke je duplikat nalaza iz B5.
+
+### Review popravki — runda 3 (glavni agent, prag > 8)
+| Grupa | Pre-review | Ocjena | Ishod |
+|---|---|---|---|
+| E1 email-consumer (4. runda) | 8.5 | **8.5/10** | PRIHVAĆENO. Supresija pokriva poddomene i IDN oblike (tačka se skida tek nakon IDN konverzije). Redelivery tokom slanja ili neposredno nakon njega ne šalje duplikat (gate + zapis prije oslobađanja ključa, test kroz `Worker.HandleAsync`). Email je `multipart/alternative`: text/plain base64 sa CRLF, HTML quoted-printable, `Message-ID`. Consumer se sam ponovo poveže nakon otkazivanja od brokera. Prazan email ide u DLQ. 458 testova, 18 atomičnih commitova. Za završni task ostaju Unicode oblici `@`/`>` (14 zaobilaženja u 1,5 mil. generisanih adresa; SMTP server bi takvu adresu odbio) i zastarjela rečenica u `SmtpOptions` |
+| M1 mobile (dorada) | 8.6 | **8.5/10** | PRIHVAĆENO. Svih 26 E2E nalaza je riješeno. Gramatika validatora je ispravna ("su obavezni", "moraju"). Chat polling se pauzira u pozadini, a zastarjeli odgovori se odbacuju. Material/Cupertino su na bosanskom. Pretplata ima uredne akcije. Osvježavanje ne briše sadržaj. Testovi stvarno čuvaju popravke (36/47 mutacija pada). 100 testova, 15 atomičnih commitova, provjereno na emulatoru. Za završni task ostaju test za ključ mjeseca u Historiji treninga, tekst praznog rezultata ispod tastature i hint "prekinuta"/"završena" |
 
 ## Sljedeći koraci (korisnik)
 
