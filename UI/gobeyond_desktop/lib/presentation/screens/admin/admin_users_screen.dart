@@ -36,6 +36,9 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     super.initState();
     _referenceDataService.roles().then((value) {
       if (mounted) setState(() => _roles = value);
+    }).catchError((error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
     });
     _load();
   }

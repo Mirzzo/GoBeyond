@@ -32,6 +32,9 @@ class _AdminAnnouncementsScreenState extends State<AdminAnnouncementsScreen> {
     super.initState();
     _referenceDataService.roles().then((value) {
       if (mounted) setState(() => _roles = value);
+    }).catchError((error) {
+      if (!mounted) return;
+      showErrorSnack(context, ApiError.from(error).message);
     });
     _load();
   }
