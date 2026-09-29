@@ -454,7 +454,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     controller: _price,
                                     keyboardType: TextInputType.number,
                                     decoration: const InputDecoration(labelText: 'Mjesečna cijena (1-1000 KM)'),
-                                    validator: _serverErrors.wrap('monthlyPrice', (v) => Validators.numberRange(v, 1, 1000, label: 'Cijena')),
+                                    validator: _serverErrors.wrap(
+                                        'monthlyPrice', (v) => Validators.numberRange(v, 1, 1000, label: 'Cijena', maxDecimals: 2)),
                                   )),
                                 ]),
                                 const SizedBox(height: 14),

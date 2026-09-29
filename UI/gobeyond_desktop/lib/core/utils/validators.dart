@@ -92,7 +92,7 @@ class Validators {
     return null;
   }
 
-  static String? numberRange(String? value, num min, num max, {required String label, bool isInt = false}) {
+  static String? numberRange(String? value, num min, num max, {required String label, bool isInt = false, int? maxDecimals}) {
     final trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) {
       return '$label je obavezno.';
@@ -103,6 +103,18 @@ class Validators {
     }
     if (parsed < min || parsed > max) {
       return '$label mora biti između $min i $max.';
+    }
+    if (!isInt && maxDecimals != null) {
+      // Compare the parsed value against itself rounded to maxDecimals
+      // places (same rule as the backend's MaxDecimalPlaces: decimal.Round(v,
+      // maxDecimals) == v), instead of counting characters after a literal
+      // '.' — that rejected valid input like '24.990' and let '24999e-3'
+      // (24.999) through.
+      final asDouble = parsed.toDouble();
+      final rounded = double.parse(asDouble.toStringAsFixed(maxDecimals));
+      if (rounded != asDouble) {
+        return '$label može imati najviše $maxDecimals decimale.';
+      }
     }
     return null;
   }

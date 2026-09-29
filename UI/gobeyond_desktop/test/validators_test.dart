@@ -104,5 +104,48 @@ void main() {
     test('accepts a value within range', () {
       expect(Validators.numberRange('99', 1, 1000, label: 'Cijena'), isNull);
     });
+
+    // monthly-price-precision: PUT /api/user-profile/me with monthlyPrice
+    // 24.999 was accepted client-side (only [Range(1,1000)] server-side, no
+    // scale check), but the decimal(10,2) column silently rounded it to
+    // 25.00 while the response echoed back the unrounded 24.999 — a
+    // confirmed price that was never actually charged. maxDecimals mirrors
+    // the DB's HasPrecision(10,2) so the desktop rejects it before it ever
+    // reaches the API.
+    group('maxDecimals', () {
+      test('rejects a price with more than 2 decimals', () {
+        expect(Validators.numberRange('24.999', 1, 1000, label: 'Cijena', maxDecimals: 2), isNotNull);
+        expect(Validators.numberRange('24.994', 1, 1000, label: 'Cijena', maxDecimals: 2), isNotNull);
+      });
+
+      test('states the limit in Bosnian', () {
+        expect(Validators.numberRange('24.999', 1, 1000, label: 'Cijena', maxDecimals: 2), contains('2 decimale'));
+      });
+
+      test('accepts a price with exactly 2 decimals', () {
+        expect(Validators.numberRange('24.99', 1, 1000, label: 'Cijena', maxDecimals: 2), isNull);
+      });
+
+      test('accepts a trailing zero that rounds to the same value', () {
+        // A trailing zero adds no precision (24.990 == 24.99), so the
+        // backend's decimal.Round(v,2)==v check accepts it — counting
+        // characters after the dot would have rejected it.
+        expect(Validators.numberRange('24.990', 1, 1000, label: 'Cijena', maxDecimals: 2), isNull);
+      });
+
+      test('rejects scientific notation that hides extra decimals', () {
+        // '24999e-3' == 24.999: no literal '.' with 3 digits after it, so a
+        // character count misses this; parsing the number does not.
+        expect(Validators.numberRange('24999e-3', 1, 1000, label: 'Cijena', maxDecimals: 2), isNotNull);
+      });
+
+      test('accepts a whole number', () {
+        expect(Validators.numberRange('25', 1, 1000, label: 'Cijena', maxDecimals: 2), isNull);
+      });
+
+      test('does not apply to integer fields', () {
+        expect(Validators.numberRange('5', 0, 60, label: 'Godine iskustva', isInt: true, maxDecimals: 2), isNull);
+      });
+    });
   });
 }
