@@ -24,3 +24,6 @@ gobeyond-web/
 
 # Local requirement sources (prijava/upute text and mockups)
 docs/requirements/
+
+# Claude Code agent worktrees
+.claude/worktrees/

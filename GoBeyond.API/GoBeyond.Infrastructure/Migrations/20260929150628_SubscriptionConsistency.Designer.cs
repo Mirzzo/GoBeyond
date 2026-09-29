@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GoBeyond.Infrastructure.Migrations
 {
     [DbContext(typeof(GoBeyondDbContext))]
-    [Migration("20260929150628_B1Fixes")]
-    partial class B1Fixes
+    [Migration("20260929150628_SubscriptionConsistency")]
+    partial class SubscriptionConsistency
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

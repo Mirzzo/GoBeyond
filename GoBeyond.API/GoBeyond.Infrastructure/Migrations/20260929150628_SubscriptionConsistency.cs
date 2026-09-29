@@ -5,7 +5,7 @@
 namespace GoBeyond.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class B1Fixes : Migration
+    public partial class SubscriptionConsistency : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
