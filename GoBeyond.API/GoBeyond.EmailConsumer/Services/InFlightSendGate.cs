@@ -13,11 +13,12 @@ public sealed class InFlightSendGate
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _inFlight = new();
 
     /// <summary>
-    /// Vraća true ako je OVAJ poziv stvarno izvršio <paramref name="attempt"/> (prvi ili nakon što je
-    /// prethodni za isti ključ propao); false ako je konkurentni poziv za isti ključ u međuvremenu već
-    /// uspješno poslao email - tada se ovaj poziv samo ack-uje bez ponovnog slanja.
+    /// Izvršava <paramref name="attempt"/> kao jedini pokušaj u toku za <paramref name="key"/>. Pokušaj vraća
+    /// true ako je poslao email, false ako je utvrdio da je već poslan; ključ se oslobađa tek kad pokušaj
+    /// završi, pa sve što pokušaj uradi nakon slanja (npr. upis u store) vide i kasniji pozivi. Vraća rezultat
+    /// pokušaja, ili false ako je konkurentni poziv za isti ključ u međuvremenu uspješno završio.
     /// </summary>
-    public async Task<bool> RunAsync(string key, Func<Task> attempt)
+    public async Task<bool> RunAsync(string key, Func<Task<bool>> attempt)
     {
         while (true)
         {
@@ -26,9 +27,9 @@ public sealed class InFlightSendGate
             {
                 try
                 {
-                    await attempt().ConfigureAwait(false);
+                    var sent = await attempt().ConfigureAwait(false);
                     tcs.TrySetResult(true);
-                    return true;
+                    return sent;
                 }
                 catch
                 {

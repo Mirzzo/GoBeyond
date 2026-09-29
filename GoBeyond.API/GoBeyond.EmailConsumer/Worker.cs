@@ -180,24 +180,19 @@ public sealed class Worker(
 
         // MessageId sam NIJE dovoljan ključ (restartuje se od 1 kad se baza resetuje) - vidi EmailIdempotencyKey.
         var idempotencyKey = EmailIdempotencyKey.For(message);
-        if (sentMessageIds.WasSent(idempotencyKey))
-        {
-            // Redelivery nakon pada procesa između uspješnog SMTP slanja i BasicAck-a (vidi SentMessageIdStore) -
-            // email je stvarno već poslan, samo se potvrđuje bez ponovnog slanja.
-            logger.LogInformation("Email {MessageId} ({EventType}) already sent earlier (redelivered by the broker); acking without resending.",
-                message.MessageId, message.EventType);
-            await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
-            return;
-        }
-
         bool sentByThisCall;
         try
         {
-            // Redelivery ISTOG ključa dok je ovaj pokušaj u toku (npr. RabbitMQ.Client automatski oporavi
-            // konekciju dok je SMTP send i dalje u toku) čeka ovaj pokušaj umjesto da šalje ponovo - vidi
-            // InFlightSendGate.
-            sentByThisCall = await inFlightSends.RunAsync(idempotencyKey,
-                () => emailSender.SendAsync(message.RecipientEmail, message.Subject, message.Body, stoppingToken));
+            // Redelivery istog ključa dok je ovaj pokušaj u toku čeka njegov ishod (InFlightSendGate). Provjera i
+            // MarkSent su unutar pokušaja, pa gate oslobađa ključ tek kad je slanje već zabilježeno: redelivery
+            // koji uđe poslije toga vidi WasSent i ne šalje ponovo.
+            sentByThisCall = await inFlightSends.RunAsync(idempotencyKey, async () =>
+            {
+                if (sentMessageIds.WasSent(idempotencyKey)) return false;
+                await emailSender.SendAsync(message.RecipientEmail, message.Subject, message.Body, stoppingToken);
+                sentMessageIds.MarkSent(idempotencyKey);
+                return true;
+            });
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
@@ -218,19 +213,12 @@ public sealed class Worker(
             return;
         }
 
-        // Loguje se PRIJE ack-a: ako ack propadne (npr. kanal se u međuvremenu zatvorio), trag o uspješnom
-        // slanju ostaje u logu umjesto da nestane zajedno sa izuzetkom. MarkSent sam hvata svoje IO greške i
-        // nikad ne baca, pa se ack ispod dešava bez obzira na to da li je upis u store uspio.
+        // Loguje se PRIJE ack-a: ako ack propadne (npr. kanal se u međuvremenu zatvorio), trag o slanju ostaje.
         if (sentByThisCall)
-        {
-            sentMessageIds.MarkSent(idempotencyKey);
             logger.LogInformation("Email {MessageId} ({EventType}) sent to {Recipient}.", message.MessageId, message.EventType, message.RecipientEmail);
-        }
         else
-        {
-            logger.LogInformation("Email {MessageId} ({EventType}) already sent by a concurrent in-flight attempt for the same message; acking without resending.",
+            logger.LogInformation("Email {MessageId} ({EventType}) already sent (redelivered by the broker); acking without resending.",
                 message.MessageId, message.EventType);
-        }
         await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
     }
 

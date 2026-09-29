@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using GoBeyond.Contracts;
 using GoBeyond.Contracts.Messages;
@@ -59,6 +60,37 @@ public class WorkerHandleAsyncTests
         Assert.Equal([1UL, 2UL], channel.Acked);
     }
 
+    // After SMTP accepted the email, the first handler resumes one continuation at a time (they are held in a
+    // manual SynchronizationContext) and a redelivery arrives before each step - including the step where the
+    // gate has already released the key. None of them may send a second copy.
+    [Fact]
+    public async Task HandleAsync_RedeliveryAtAnyPointAfterTheSmtpSend_DoesNotResend()
+    {
+        var sender = new BlockingEmailSender();
+        var worker = NewWorker(sender, new SentMessageIdStore(path: null));
+        var channel = new NoOpChannel();
+        var firstHandler = new ManualSynchronizationContext();
+        ulong nextTag = 1;
+        Task Handle(SynchronizationContext? context)
+        {
+            var delivery = Delivery(nextTag++);
+            return RunWithContext(context, () => worker.HandleAsync(channel, delivery, Settings, CancellationToken.None));
+        }
+
+        var first = Handle(firstHandler);
+        sender.Release();
+        var redeliveries = new List<Task> { Handle(null) };
+        while (!first.IsCompleted)
+        {
+            firstHandler.RunNext(TimeSpan.FromSeconds(10));
+            redeliveries.Add(Handle(null));
+        }
+        await Task.WhenAll(redeliveries.Append(first)).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, sender.CallCount);
+        Assert.Equal(Enumerable.Range(1, (int)nextTag - 1).Select(tag => (ulong)tag), channel.Acked);
+    }
+
     // Redelivery after a process restart: the key is already in the store, so nothing is sent.
     [Fact]
     public async Task HandleAsync_MessageAlreadyRecordedAsSent_IsAckedWithoutSending()
@@ -86,5 +118,40 @@ public class WorkerHandleAsyncTests
             .WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.True(store.WasSent(EmailIdempotencyKey.For(Message)));
+    }
+
+    private static Task RunWithContext(SynchronizationContext? context, Func<Task> start)
+    {
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            return start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+
+    /// <summary>
+    /// Holds the continuations captured in this context until the test runs them one at a time with
+    /// <see cref="RunNext"/>. A continuation runs outside this context, so the handler's next continuation is
+    /// queued again instead of running inline.
+    /// </summary>
+    private sealed class ManualSynchronizationContext : SynchronizationContext
+    {
+        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+
+        public override void Post(SendOrPostCallback d, object? state) => _queue.Add((d, state));
+
+        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+
+        public void RunNext(TimeSpan timeout)
+        {
+            if (!_queue.TryTake(out var work, timeout))
+                throw new TimeoutException("No continuation was posted.");
+            work.Callback(work.State);
+        }
     }
 }
