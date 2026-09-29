@@ -73,7 +73,11 @@ public sealed class OutboxDispatcher(
         }
     }
 
-    private async Task DispatchBatchAsync(IChannel channel, RabbitMqOptions settings, CancellationToken stoppingToken)
+    /// <summary>
+    /// Objavljuje jednu seriju neposlanih poruka iz outbox-a na <paramref name="channel"/>. Public radi testova
+    /// (OutboxDispatcherTests), koji ga pozivaju nad lažnim kanalom bez RabbitMQ-a.
+    /// </summary>
+    public async Task DispatchBatchAsync(IChannel channel, RabbitMqOptions settings, CancellationToken stoppingToken)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<GoBeyondDbContext>();
