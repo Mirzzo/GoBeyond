@@ -96,7 +96,7 @@ Svaka stavka prijave (2.1, 2.2, 3.1.x, 3.2.x, 5, Obim) i svako pravilo iz uputa 
 - desktop 9/10: certifikati se preuzimaju preko autentifikovanog klijenta (PDF/slika po Content-Type), mentor može pregledati svoje certifikate, dio 5.11; `pdf`/`printing` ostaju jer novije verzije traže Dart 3.12 (mašina ima Flutter 3.41.4 / Dart 3.11.1). 38 testova. Commit `d31394a`.
 - mobile 9/10: vidi tabelu. Commit `0008fa5`.
 
-Napomena: `flutter build windows` na ovoj mašini pada jer je Windows Developer Mode isključen (Flutter traži symlinkove za pluginove). Korisnik ga treba uključiti: Settings → System → For developers.
+Napomena: u sandboxu agenata `flutter build windows` je padao zbog symlinkova za pluginove (Developer Mode isključen). Dana 29.09.2026. release build je uspio iz sesije glavnog agenta: `UI/gobeyond_desktop/build/windows/x64/runner/Release/gobeyond_desktop.exe`.
 
 ### Završna provjera (svježi klon, kao ocjenjivač) — PROŠLO
 - `git clone` → `docker compose up -d --build` bez `.env` i bez ikakvih izmjena: svih 5 servisa healthy za ~1 min.
@@ -112,9 +112,9 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
 ## Sljedeći koraci (korisnik)
 
 1. **Stripe TEST ključevi** u `.env` (`Payments__SecretKey`, `Payments__PublishableKey`) da plaćanje radi. Ocjenjivač mora moći platiti bez intervencije, pa odlučiti kako mu dostaviti ključeve. Ključevi se ne smiju commitati u javni repo osim ako je to svjesna odluka (samo TEST ključevi).
-2. **Windows Developer Mode** (Settings → System → For developers) — bez njega `flutter run -d windows` ne builda desktop.
+2. **Windows Developer Mode** (Settings → System → For developers) — preporučeno ako `flutter run -d windows` javi grešku o symlinkovima (release build je 29.09. uspio i bez njega).
 3. **Android emulator test** mobilne aplikacije (na ovoj mašini nema Android SDK-a): posebno Stripe PaymentSheet (flutter_stripe 13.1), upload slika, navigacija.
-4. Ručno proći desktop tokove (plan builder, izvještaji PDF/print) nakon uključenja Developer Mode-a.
+4. Ručno proći desktop tokove (plan builder, izvještaji PDF/print) u buildanoj aplikaciji.
 5. `git push` na GitHub (repo mora biti javan) — nije urađeno automatski.
 
 Poznata ograničenja: Stripe tokovi (uspješno plaćanje, refund, webhook) testirani samo unit testovima s lažnim gatewayem, ne protiv pravog Stripe-a; podsjetnik pred istek i automatski Expired nisu viđeni live (implementirani i pokriveni kodom).
