@@ -8,6 +8,12 @@ import '../../widgets/panel.dart';
 import 'widgets/client_description_dialog.dart';
 import 'widgets/plan_builder_dialog.dart';
 
+/// Warning shown in the ODBIJ dialog (api-contract.md §6): the client's
+/// payment is refunded, unless the charge is disputed at the client's bank
+/// (Stripe then refuses the refund and the reject response says so).
+String collaborationRejectWarning(String clientFullName) =>
+    'Klijentu $clientFullName će biti vraćen novac za uplatu (refundacija), osim ako je naplata osporena kod banke klijenta.';
+
 /// Mockup 03 — ZAHTJEVI ZA SURADNJU.
 class MentorCollaborationRequestsScreen extends StatefulWidget {
   const MentorCollaborationRequestsScreen({super.key});
@@ -74,7 +80,7 @@ class _MentorCollaborationRequestsScreenState extends State<MentorCollaborationR
       context,
       title: 'Odbij zahtjev',
       label: 'Razlog odbijanja (10-500 znakova)',
-      warning: 'Klijentu ${request['clientFullName']} će biti vraćen novac za uplatu (refundacija).',
+      warning: collaborationRejectWarning(request['clientFullName'] as String? ?? ''),
       confirmLabel: 'ODBIJ',
     );
     if (reason == null) return;
