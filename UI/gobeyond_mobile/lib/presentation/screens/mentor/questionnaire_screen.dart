@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../core/utils/validators.dart';
 import '../../../data/models/mentor_summary.dart';
 import '../../../data/models/questionnaire.dart';
@@ -85,9 +86,12 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final priceLabel = widget.mentor.currency.toUpperCase() == 'USD'
-        ? '${widget.mentor.monthlyPrice.toStringAsFixed(2)}\$'
-        : '${widget.mentor.monthlyPrice.toStringAsFixed(2)} ${widget.mentor.currency}';
+    // Shared with KUPI PLAN, the confirmation screen, the subscription card
+    // and payment history so the price reads identically everywhere
+    // (previously this screen hand-rolled its own "29.00$" format instead of
+    // Formatters.price's "$29.00").
+    final priceLabel =
+        Formatters.price(widget.mentor.monthlyPrice, widget.mentor.currency);
 
     return AppModalPage(
       body: Form(

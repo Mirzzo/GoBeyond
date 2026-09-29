@@ -3,7 +3,9 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/payment_sheet_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/stripe_error_messages.dart';
 import '../../../core/utils/validators.dart';
 import '../../../data/models/review.dart';
 import '../../../data/models/subscription.dart';
@@ -93,9 +95,13 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: intent.clientSecret,
           merchantDisplayName: 'GoBeyond',
+          appearance: paymentSheetAppearance,
         ),
       );
       await Stripe.instance.presentPaymentSheet();
+      // Only reachable once the sheet reports success, so the backend must
+      // always learn about it - otherwise the subscription stays stuck in
+      // PendingPayment/Active-but-not-renewed even though the card charged.
       await _paymentRepository.confirmPayment(intent.paymentId);
       if (!mounted) return;
       showSuccessSnackBar(
@@ -107,16 +113,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       _reload();
     } on StripeException catch (error) {
       if (!mounted) return;
-      final isCanceled = error.error.code == FailureCode.Canceled;
-      showErrorSnackBar(
-        context,
-        isCanceled
-            ? 'Plaćanje je otkazano.'
-            : (error.error.localizedMessage ?? 'Plaćanje nije uspjelo.'),
-      );
+      showErrorSnackBar(context, stripePaymentErrorMessage(error));
     } catch (error) {
       if (!mounted) return;
-      showErrorSnackBar(context, ApiException.from(error).message);
+      final apiError = ApiException.from(error);
+      showErrorSnackBar(context, apiError.message);
+      if (apiError.statusCode == 409) {
+        // create-intent's 409s (`api-contract.md` v1.2) mean the backend
+        // already moved this subscription/payment on without us - either a
+        // previous attempt succeeded after we lost the response (payment
+        // applied, subscription now Active/AwaitingMentor) or a duplicate
+        // attempt is still processing. Refresh so the card's status/buttons
+        // reflect reality instead of leaving the user staring at a stale
+        // "NASTAVI PLAĆANJE"/"PRODUŽI" button that looks like it failed.
+        _reload();
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

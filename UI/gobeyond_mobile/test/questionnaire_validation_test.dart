@@ -50,8 +50,8 @@ void main() {
       await tester.enterText(fields.at(i), 'a');
     }
 
-    await tester.ensureVisible(find.text('PRETPLATI SE 19.99\$'));
-    await tester.tap(find.text('PRETPLATI SE 19.99\$'));
+    await tester.ensureVisible(find.text('PRETPLATI SE \$19.99'));
+    await tester.tap(find.text('PRETPLATI SE \$19.99'));
     await tester.pumpAndSettle();
 
     expect(
@@ -80,8 +80,8 @@ void main() {
       await tester.enterText(fields.at(i), 'Ovo je validan odgovor broj $i.');
     }
 
-    await tester.ensureVisible(find.text('PRETPLATI SE 19.99\$'));
-    await tester.tap(find.text('PRETPLATI SE 19.99\$'));
+    await tester.ensureVisible(find.text('PRETPLATI SE \$19.99'));
+    await tester.tap(find.text('PRETPLATI SE \$19.99'));
     await tester.pumpAndSettle();
 
     expect(find.text('Potvrda pretplate'), findsOneWidget);

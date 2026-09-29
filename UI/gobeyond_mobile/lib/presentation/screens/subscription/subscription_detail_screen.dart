@@ -145,14 +145,8 @@ class _SubscriptionDetailBody extends StatelessWidget {
                 child: Row(
                   children: [
                     Icon(
-                      payment.status == 'Succeeded'
-                          ? Icons.check_circle_rounded
-                          : payment.status == 'Refunded'
-                              ? Icons.undo_rounded
-                              : Icons.hourglass_top_rounded,
-                      color: payment.status == 'Succeeded'
-                          ? AppTheme.success
-                          : AppTheme.textMuted,
+                      _paymentStatusIcon(payment.status),
+                      color: _paymentStatusColor(payment.status),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -179,8 +173,15 @@ class _SubscriptionDetailBody extends StatelessWidget {
     );
   }
 
+  // `Payment.status` (api-contract.md §1 + v1.2 changelog): Pending,
+  // Succeeded, Failed, Refunded, RefundPending. Any value not in that list
+  // is a future/unrecognized status the backend may add later - shown
+  // as-is rather than mislabeled "Na čekanju" (contract: "UI mora podržati
+  // nepoznate/nove vrijednosti").
   String _paymentStatusLabel(String status) {
     switch (status) {
+      case 'Pending':
+        return 'Na čekanju';
       case 'Succeeded':
         return 'Uspješno';
       case 'Failed':
@@ -190,7 +191,32 @@ class _SubscriptionDetailBody extends StatelessWidget {
       case 'RefundPending':
         return 'Povrat novca u obradi';
       default:
-        return 'Na čekanju';
+        return status;
+    }
+  }
+
+  IconData _paymentStatusIcon(String status) {
+    switch (status) {
+      case 'Succeeded':
+        return Icons.check_circle_rounded;
+      case 'Failed':
+        return Icons.cancel_rounded;
+      case 'Refunded':
+      case 'RefundPending':
+        return Icons.undo_rounded;
+      default:
+        return Icons.hourglass_top_rounded;
+    }
+  }
+
+  Color _paymentStatusColor(String status) {
+    switch (status) {
+      case 'Succeeded':
+        return AppTheme.success;
+      case 'Failed':
+        return AppTheme.danger;
+      default:
+        return AppTheme.textMuted;
     }
   }
 }

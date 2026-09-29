@@ -3,7 +3,9 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/payment_sheet_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/stripe_error_messages.dart';
 import '../../../data/models/mentor_summary.dart';
 import '../../../data/models/questionnaire.dart';
 import '../../../data/repositories/payment_repository.dart';
@@ -85,11 +87,16 @@ class _SubscriptionConfirmScreenState extends State<SubscriptionConfirmScreen> {
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: intent.clientSecret,
           merchantDisplayName: 'GoBeyond',
+          appearance: paymentSheetAppearance,
         ),
       );
       await Stripe.instance.presentPaymentSheet();
       if (!mounted) return;
 
+      // Only reachable once the sheet reports success (any failure/cancel
+      // throws a StripeException below), so the backend must always learn
+      // about it - otherwise the subscription stays stuck in PendingPayment
+      // even though the client's card was charged.
       setState(() => _statusMessage = 'Potvrđivanje uplate...');
       await _paymentRepository.confirmPayment(intent.paymentId);
 
@@ -109,17 +116,31 @@ class _SubscriptionConfirmScreenState extends State<SubscriptionConfirmScreen> {
       );
     } on StripeException catch (error) {
       if (!mounted) return;
-      final isCanceled = error.error.code == FailureCode.Canceled;
-      setState(() {
-        _errorMessage = isCanceled
-            ? 'Plaćanje je otkazano. Možete pokušati ponovo kada budete spremni.'
-            : (error.error.localizedMessage ??
-                error.error.message ??
-                'Plaćanje nije uspjelo. Pokušajte ponovo.');
-      });
+      setState(() => _errorMessage = stripePaymentErrorMessage(error));
     } catch (error) {
       if (!mounted) return;
       final apiError = ApiException.from(error);
+      if (apiError.statusCode == 409) {
+        // create-intent's 409s (`api-contract.md` v1.2) mean the backend
+        // already moved this subscription/payment on without us: either a
+        // previous attempt succeeded (e.g. the app lost connection right
+        // after presentPaymentSheet but before confirm) or another attempt
+        // is still processing. Either way there is nothing left to retry on
+        // this one-shot confirm screen and re-running it (which would call
+        // createSubscription again) would only confuse the user, so send
+        // them to Home/Pretplata instead of leaving a dead-end error banner.
+        await showInfoDialog(
+          context,
+          title: 'Pretplata je već obrađena',
+          message: apiError.message,
+        );
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          (route) => false,
+        );
+        return;
+      }
       setState(() => _errorMessage = _describeError(apiError));
     } finally {
       if (mounted) setState(() => _processing = false);
