@@ -131,7 +131,7 @@ public sealed class RecommendationService(GoBeyondDbContext db, IMentorCatalogSe
                 x.TrainingTypeId,
                 x.YearsOfExperience,
                 Name = x.User.FirstName + " " + x.User.LastName,
-                Visible = x.User.IsActive && !x.User.IsDeleted,
+                Visible = x.User.IsActive && !x.User.IsDeleted && x.User.Role == UserRole.Mentor, // isto kao QueryExtensions.Visible
                 Specializations = x.Specializations.Select(s => s.FitnessGoalId).ToList(),
                 Average = x.Reviews.Average(r => (double?)r.Rating),
                 ReviewCount = x.Reviews.Count

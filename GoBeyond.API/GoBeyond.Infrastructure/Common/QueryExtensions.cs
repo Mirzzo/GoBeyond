@@ -23,9 +23,12 @@ public static class QueryExtensions
         .Include(x => x.ClientProfile).ThenInclude(x => x.User)
         .Include(x => x.Days);
 
-    /// <summary>Mentori vidljivi klijentima: odobreni, aktivni i neobrisani.</summary>
+    /// <summary>
+    /// Mentori vidljivi klijentima: odobreni, aktivni, neobrisani i sa ulogom Mentor (profil korisnika kojem je
+    /// administrator promijenio ulogu ostaje sačuvan, ali se ne nudi dok mu se uloga ne vrati).
+    /// </summary>
     public static IQueryable<MentorProfile> Visible(this IQueryable<MentorProfile> query) => query
-        .Where(x => x.Status == MentorApprovalStatus.Approved && x.User.IsActive && !x.User.IsDeleted);
+        .Where(x => x.Status == MentorApprovalStatus.Approved && x.User.IsActive && !x.User.IsDeleted && x.User.Role == UserRole.Mentor);
 
     /// <summary>Statusi u kojima klijent "ima" saradnju (može imati samo jednu takvu).</summary>
     public static readonly SubscriptionStatus[] OpenStatuses =

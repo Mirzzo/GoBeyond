@@ -27,8 +27,9 @@ public sealed class AdminMentorService(GoBeyondDbContext db, INotificationSender
 {
     public async Task<List<AdminMentorDto>> GetMentorsAsync(AdminMentorSearchObject search, CancellationToken cancellationToken = default)
     {
+        // Korisnik kojem je uloga promijenjena (npr. u Client) nije mentor, iako mu profil ostaje Approved.
         var query = db.MentorProfiles.AsNoTracking()
-            .Where(x => x.Status == MentorApprovalStatus.Approved && !x.User.IsDeleted);
+            .Where(x => x.Status == MentorApprovalStatus.Approved && !x.User.IsDeleted && x.User.Role == UserRole.Mentor);
         if (search.Search.NormalizeSearch() is { } term)
             query = query.Where(x => (x.User.FirstName + " " + x.User.LastName).Contains(term) ||
                                      x.User.Username.Contains(term) || x.User.Email.Contains(term) ||
@@ -133,7 +134,7 @@ public sealed class AdminMentorService(GoBeyondDbContext db, INotificationSender
             "Administrator je odobrio vaš mentorski nalog. Sada se možete prijaviti u desktop aplikaciju i primati zahtjeve klijenata.",
             sendEmail: true);
         await db.SaveChangesAsync(cancellationToken);
-        return new MessageResponse($"Mentor {mentor.User.FullName} je odobren.");
+        return new MessageResponse($"Mentorski nalog ({mentor.User.FullName}) je odobren.");
     }
 
     public async Task<MessageResponse> RejectAsync(int mentorProfileId, RejectRequest request, CancellationToken cancellationToken = default)
@@ -147,7 +148,7 @@ public sealed class AdminMentorService(GoBeyondDbContext db, INotificationSender
         notifications.Notify(mentor.User, NotificationType.MentorRejected, "Zahtjev za mentorski nalog je odbijen",
             $"Vaš zahtjev za mentorski nalog je odbijen. Razlog: {reason}", sendEmail: true);
         await db.SaveChangesAsync(cancellationToken);
-        return new MessageResponse($"Zahtjev mentora {mentor.User.FullName} je odbijen.");
+        return new MessageResponse($"Zahtjev za mentorski nalog ({mentor.User.FullName}) je odbijen.");
     }
 
     public async Task<CertificateDto> VerifyCertificateAsync(int certificateId, CancellationToken cancellationToken = default)

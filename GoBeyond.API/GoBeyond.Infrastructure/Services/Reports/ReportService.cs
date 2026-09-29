@@ -200,8 +200,10 @@ public sealed class ReportService(GoBeyondDbContext db, IPaymentGateway paymentG
         };
     }
 
+    /// <summary>Odobreni i neobrisani mentori koji su i dalje u ulozi Mentor (blokirani se broje).</summary>
     private IQueryable<MentorProfile> ApprovedMentors() =>
-        db.MentorProfiles.AsNoTracking().Where(x => x.Status == MentorApprovalStatus.Approved && !x.User.IsDeleted);
+        db.MentorProfiles.AsNoTracking()
+            .Where(x => x.Status == MentorApprovalStatus.Approved && !x.User.IsDeleted && x.User.Role == UserRole.Mentor);
 
     private static IQueryable<MentorRow> ProjectMentorRows(IQueryable<MentorProfile> query, Period period) =>
         query.Select(x => new MentorRow
