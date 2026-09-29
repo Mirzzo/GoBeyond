@@ -32,7 +32,9 @@ class Validators {
   const Validators._();
 
   static final _emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}$');
-  static final _phoneRegex = RegExp(r'^\+?[0-9 ()-]{6,20}$');
+  // Matches the backend's ValidationPatterns.Phone exactly (api-contract.md):
+  // a BH mobile number, e.g. "+387 61 123 456".
+  static final _phoneRegex = RegExp(r'^\+387 ?6\d ?\d{3} ?\d{3,4}$');
   static final _usernameRegex = RegExp(r'^[a-zA-Z0-9._]{3,30}$');
   static final _passwordRegex = RegExp(r'^(?=.*[A-Za-z])(?=.*\d).{8,64}$');
 
@@ -61,7 +63,7 @@ class Validators {
   static String? optionalPhone(String? value) {
     if (value == null || value.trim().isEmpty) return null;
     if (!_phoneRegex.hasMatch(value.trim())) {
-      return 'Unesite validan broj telefona (npr. +387 61 123 456).';
+      return 'Telefon mora biti u formatu +387 6X XXX XXX.';
     }
     return null;
   }
