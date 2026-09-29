@@ -230,10 +230,11 @@ class _UserEditDialogState extends State<_UserEditDialog> {
       showSuccessSnack(context, 'Podaci korisnika ${_firstName.text.trim()} ${_lastName.text.trim()} su sačuvani.');
       Navigator.of(context).pop(true);
     } catch (error) {
+      if (!mounted) return;
       final apiError = ApiError.from(error, fallback: 'Čuvanje korisnika nije uspjelo.');
       setState(() => _serverErrors.apply(apiError.fieldErrors));
       _formKey.currentState!.validate();
-      if (mounted) showErrorSnack(context, apiError.message);
+      showErrorSnack(context, apiError.message);
     } finally {
       if (mounted) setState(() => _saving = false);
     }

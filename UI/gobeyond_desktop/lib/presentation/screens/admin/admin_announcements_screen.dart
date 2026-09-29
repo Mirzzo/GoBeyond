@@ -59,90 +59,11 @@ class _AdminAnnouncementsScreenState extends State<AdminAnnouncementsScreen> {
   }
 
   Future<void> _openForm({Map<String, dynamic>? existing}) async {
-    final formKey = GlobalKey<FormState>();
-    final serverErrors = ServerErrors();
-    final titleController = TextEditingController(text: existing?['title'] as String? ?? '');
-    final contentController = TextEditingController(text: existing?['content'] as String? ?? '');
-    String? targetRole = existing?['targetRole'] as String?;
-    final isEdit = existing != null;
-
-    final saved = await showGbDialog<bool>(
-      context: context,
-      title: isEdit ? 'Uredi sistemsku obavijest' : 'Nova sistemska obavijest',
-      width: 520,
-      child: StatefulBuilder(
-        builder: (context, setLocalState) => Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: titleController,
-                decoration: const InputDecoration(labelText: 'Naslov'),
-                validator: serverErrors.wrap('title', (v) => Validators.lengthRange(v, 3, 120, label: 'Naslov')),
-              ),
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: contentController,
-                maxLines: 5,
-                decoration: const InputDecoration(labelText: 'Sadržaj'),
-                validator: serverErrors.wrap('content', (v) => Validators.lengthRange(v, 10, 2000, label: 'Sadržaj')),
-              ),
-              const SizedBox(height: 14),
-              DropdownButtonFormField<String?>(
-                initialValue: targetRole,
-                decoration: const InputDecoration(labelText: 'Ciljna grupa'),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('Svi korisnici')),
-                  ..._roles.map((r) => DropdownMenuItem(value: r['value'] as String, child: Text(r['name'] as String))),
-                ],
-                onChanged: isEdit ? null : (value) => setLocalState(() => targetRole = value),
-              ),
-              if (isEdit)
-                const Padding(
-                  padding: EdgeInsets.only(top: 6),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Ciljna grupa se ne može mijenjati nakon slanja.', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Odustani')),
-        const SizedBox(width: 8),
-        ElevatedButton(
-          onPressed: () async {
-            if (!formKey.currentState!.validate()) return;
-            try {
-              if (isEdit) {
-                await _service.updateAnnouncement(existing['id'] as int, titleController.text.trim(), contentController.text.trim());
-              } else {
-                await _service.createAnnouncement(titleController.text.trim(), contentController.text.trim(), targetRole);
-              }
-              if (!mounted) return;
-              Navigator.of(context).pop(true);
-            } catch (error) {
-              final apiError = ApiError.from(error, fallback: 'Čuvanje nije uspjelo.');
-              serverErrors.apply(apiError.fieldErrors);
-              formKey.currentState!.validate();
-              if (!mounted) return;
-              showErrorSnack(context, apiError.message);
-            }
-          },
-          child: Text(isEdit ? 'SAČUVAJ' : 'OBJAVI'),
-        ),
-      ],
-    );
-
-    titleController.dispose();
-    contentController.dispose();
+    final saved = await showAnnouncementDialog(context, service: _service, roles: _roles, existing: existing);
 
     if (saved == true) {
       if (!mounted) return;
-      showSuccessSnack(context, isEdit ? 'Obavijest je ažurirana.' : 'Sistemska obavijest je objavljena.');
+      showSuccessSnack(context, existing != null ? 'Obavijest je ažurirana.' : 'Sistemska obavijest je objavljena.');
       _load();
     }
   }
@@ -227,6 +148,129 @@ class _AdminAnnouncementsScreenState extends State<AdminAnnouncementsScreen> {
                       ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The NOVA/UREDI OBAVIJEST form. Its own [StatefulWidget] so the title and
+/// content [TextEditingController]s are created in `initState` and disposed
+/// in `dispose` — called only once the dialog route is actually removed,
+/// unlike disposing them by hand right after `await showDialog(...)`
+/// returns, which raced the dialog's exit transition and threw "A
+/// TextEditingController was used after being disposed."
+Future<bool?> showAnnouncementDialog(
+  BuildContext context, {
+  required AdminService service,
+  required List<Map<String, dynamic>> roles,
+  Map<String, dynamic>? existing,
+}) {
+  return showDialog<bool>(
+    context: context,
+    builder: (_) => _AnnouncementDialog(service: service, roles: roles, existing: existing),
+  );
+}
+
+class _AnnouncementDialog extends StatefulWidget {
+  const _AnnouncementDialog({required this.service, required this.roles, this.existing});
+
+  final AdminService service;
+  final List<Map<String, dynamic>> roles;
+  final Map<String, dynamic>? existing;
+
+  @override
+  State<_AnnouncementDialog> createState() => _AnnouncementDialogState();
+}
+
+class _AnnouncementDialogState extends State<_AnnouncementDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _serverErrors = ServerErrors();
+  late final _titleController = TextEditingController(text: widget.existing?['title'] as String? ?? '');
+  late final _contentController = TextEditingController(text: widget.existing?['content'] as String? ?? '');
+  String? _targetRole;
+
+  bool get _isEdit => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _targetRole = widget.existing?['targetRole'] as String?;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _contentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    try {
+      if (_isEdit) {
+        await widget.service.updateAnnouncement(
+            widget.existing!['id'] as int, _titleController.text.trim(), _contentController.text.trim());
+      } else {
+        await widget.service.createAnnouncement(_titleController.text.trim(), _contentController.text.trim(), _targetRole);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      final apiError = ApiError.from(error, fallback: 'Čuvanje nije uspjelo.');
+      setState(() => _serverErrors.apply(apiError.fieldErrors));
+      _formKey.currentState!.validate();
+      showErrorSnack(context, apiError.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GbDialog(
+      title: _isEdit ? 'Uredi sistemsku obavijest' : 'Nova sistemska obavijest',
+      width: 520,
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Odustani')),
+        const SizedBox(width: 8),
+        ElevatedButton(onPressed: _submit, child: Text(_isEdit ? 'SAČUVAJ' : 'OBJAVI')),
+      ],
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _titleController,
+              decoration: const InputDecoration(labelText: 'Naslov'),
+              validator: _serverErrors.wrap('title', (v) => Validators.lengthRange(v, 3, 120, label: 'Naslov')),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _contentController,
+              maxLines: 5,
+              decoration: const InputDecoration(labelText: 'Sadržaj'),
+              validator: _serverErrors.wrap('content', (v) => Validators.lengthRange(v, 10, 2000, label: 'Sadržaj')),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String?>(
+              initialValue: _targetRole,
+              decoration: const InputDecoration(labelText: 'Ciljna grupa'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Svi korisnici')),
+                ...widget.roles.map((r) => DropdownMenuItem(value: r['value'] as String, child: Text(r['name'] as String))),
+              ],
+              onChanged: _isEdit ? null : (value) => setState(() => _targetRole = value),
+            ),
+            if (_isEdit)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Ciljna grupa se ne može mijenjati nakon slanja.', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -124,6 +124,16 @@ Future<bool> showConfirmDialog(
 
 /// Prompts for a free-text reason within [minLength]..[maxLength] characters
 /// (used by reject/cancel flows that require an explanation per the contract).
+///
+/// The dialog body is its own [StatefulWidget] ([_ReasonDialog]) so its
+/// [TextEditingController] is created in `initState` and disposed in
+/// `dispose`, which Flutter only calls once the route has actually been
+/// removed from the tree. Disposing it manually right after `await
+/// showDialog(...)` returns (the previous approach) raced the dialog's exit
+/// transition: the still-animating, still-focused TextFormField rebuilt and
+/// tried to add a listener to the already-disposed controller, throwing "A
+/// TextEditingController was used after being disposed." on every real
+/// reject/cancel and leaving the screen in a broken, unresponsive state.
 Future<String?> showReasonDialog(
   BuildContext context, {
   required String title,
@@ -132,69 +142,110 @@ Future<String?> showReasonDialog(
   int minLength = 10,
   int maxLength = 500,
   String confirmLabel = 'Potvrdi',
-}) async {
-  final controller = TextEditingController();
-  final formKey = GlobalKey<FormState>();
-
-  final result = await showGbDialog<String>(
+}) {
+  return showDialog<String>(
     context: context,
-    title: title,
-    width: 520,
-    child: Form(
-      key: formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (warning != null) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.danger.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded, color: AppColors.danger),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(warning, style: const TextStyle(color: Colors.white))),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          TextFormField(
-            controller: controller,
-            maxLines: 4,
-            maxLength: maxLength,
-            decoration: InputDecoration(labelText: label),
-            validator: (value) {
-              final trimmed = value?.trim() ?? '';
-              if (trimmed.length < minLength || trimmed.length > maxLength) {
-                return 'Obrazloženje mora imati između $minLength i $maxLength znakova.';
-              }
-              return null;
-            },
-          ),
-        ],
-      ),
+    builder: (_) => _ReasonDialog(
+      title: title,
+      label: label,
+      warning: warning,
+      minLength: minLength,
+      maxLength: maxLength,
+      confirmLabel: confirmLabel,
     ),
-    actions: [
-      TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Odustani')),
-      const SizedBox(width: 8),
-      ElevatedButton(
-        onPressed: () {
-          if (formKey.currentState!.validate()) {
-            Navigator.of(context).pop(controller.text.trim());
-          }
-        },
-        child: Text(confirmLabel),
-      ),
-    ],
   );
-  controller.dispose();
-  return result;
+}
+
+class _ReasonDialog extends StatefulWidget {
+  const _ReasonDialog({
+    required this.title,
+    required this.label,
+    this.warning,
+    required this.minLength,
+    required this.maxLength,
+    required this.confirmLabel,
+  });
+
+  final String title;
+  final String label;
+  final String? warning;
+  final int minLength;
+  final int maxLength;
+  final String confirmLabel;
+
+  @override
+  State<_ReasonDialog> createState() => _ReasonDialogState();
+}
+
+class _ReasonDialogState extends State<_ReasonDialog> {
+  final _controller = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GbDialog(
+      title: widget.title,
+      width: 520,
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Odustani')),
+        const SizedBox(width: 8),
+        ElevatedButton(
+          onPressed: () {
+            if (_formKey.currentState!.validate()) {
+              Navigator.of(context).pop(_controller.text.trim());
+            }
+          },
+          child: Text(widget.confirmLabel),
+        ),
+      ],
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.warning != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.danger.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: AppColors.danger),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(widget.warning!, style: const TextStyle(color: Colors.white))),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            TextFormField(
+              controller: _controller,
+              maxLines: 4,
+              maxLength: widget.maxLength,
+              decoration: InputDecoration(labelText: widget.label),
+              validator: (value) {
+                final trimmed = value?.trim() ?? '';
+                if (trimmed.length < widget.minLength || trimmed.length > widget.maxLength) {
+                  return 'Obrazloženje mora imati između ${widget.minLength} i ${widget.maxLength} znakova.';
+                }
+                return null;
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 void showSuccessSnack(BuildContext context, String message) {

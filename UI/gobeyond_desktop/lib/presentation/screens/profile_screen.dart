@@ -287,74 +287,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _changePassword() async {
-    final formKey = GlobalKey<FormState>();
-    final serverErrors = ServerErrors();
-    final current = TextEditingController();
-    final newPassword = TextEditingController();
-    final confirm = TextEditingController();
-
-    await showGbDialog<void>(
+  Future<void> _changePassword() {
+    return showDialog<void>(
       context: context,
-      title: 'Promjena lozinke',
-      child: Form(
-        key: formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              controller: current,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Trenutna lozinka'),
-              validator: serverErrors.wrap('currentPassword', (v) => (v == null || v.isEmpty) ? 'Unesite trenutnu lozinku.' : null),
-            ),
-            const SizedBox(height: 14),
-            TextFormField(
-              controller: newPassword,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Nova lozinka'),
-              validator: serverErrors.wrap('newPassword', Validators.password),
-            ),
-            const SizedBox(height: 14),
-            TextFormField(
-              controller: confirm,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Potvrdite novu lozinku'),
-              validator: serverErrors.wrap('confirmPassword', (v) => Validators.confirmPassword(v, newPassword.text)),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Odustani')),
-        const SizedBox(width: 8),
-        ElevatedButton(
-          onPressed: () async {
-            if (!formKey.currentState!.validate()) return;
-            try {
-              final message = await _authService.changePassword(
-                currentPassword: current.text,
-                newPassword: newPassword.text,
-                confirmPassword: confirm.text,
-              );
-              if (!mounted) return;
-              Navigator.of(context).pop();
-              showSuccessSnack(context, message);
-            } catch (error) {
-              final apiError = ApiError.from(error, fallback: 'Promjena lozinke nije uspjela.');
-              serverErrors.apply(apiError.fieldErrors);
-              formKey.currentState!.validate();
-              if (!mounted) return;
-              showErrorSnack(context, apiError.message);
-            }
-          },
-          child: const Text('Promijeni lozinku'),
-        ),
-      ],
+      builder: (_) => _ChangePasswordDialog(authService: _authService),
     );
-    current.dispose();
-    newPassword.dispose();
-    confirm.dispose();
   }
 
   @override
@@ -598,6 +535,97 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
+    );
+  }
+}
+
+/// The "Promjena lozinke" form. Its own [StatefulWidget] so its
+/// [TextEditingController]s are created in `initState` and disposed in
+/// `dispose` — called only once the dialog route is actually removed,
+/// unlike disposing them by hand right after `await showDialog(...)`
+/// returns, which raced the dialog's exit transition and threw "A
+/// TextEditingController was used after being disposed."
+class _ChangePasswordDialog extends StatefulWidget {
+  const _ChangePasswordDialog({required this.authService});
+
+  final AuthService authService;
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _serverErrors = ServerErrors();
+  final _current = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _confirm = TextEditingController();
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _newPassword.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    try {
+      final message = await widget.authService.changePassword(
+        currentPassword: _current.text,
+        newPassword: _newPassword.text,
+        confirmPassword: _confirm.text,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      showSuccessSnack(context, message);
+    } catch (error) {
+      if (!mounted) return;
+      final apiError = ApiError.from(error, fallback: 'Promjena lozinke nije uspjela.');
+      setState(() => _serverErrors.apply(apiError.fieldErrors));
+      _formKey.currentState!.validate();
+      showErrorSnack(context, apiError.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GbDialog(
+      title: 'Promjena lozinke',
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Odustani')),
+        const SizedBox(width: 8),
+        ElevatedButton(onPressed: _submit, child: const Text('Promijeni lozinku')),
+      ],
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _current,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Trenutna lozinka'),
+              validator: _serverErrors.wrap('currentPassword', (v) => (v == null || v.isEmpty) ? 'Unesite trenutnu lozinku.' : null),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _newPassword,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Nova lozinka'),
+              validator: _serverErrors.wrap('newPassword', Validators.password),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _confirm,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Potvrdite novu lozinku'),
+              validator: _serverErrors.wrap('confirmPassword', (v) => Validators.confirmPassword(v, _newPassword.text)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

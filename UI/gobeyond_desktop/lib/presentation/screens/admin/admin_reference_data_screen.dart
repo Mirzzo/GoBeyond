@@ -137,94 +137,15 @@ class _ReferenceTabState extends State<_ReferenceTab> with AutomaticKeepAliveCli
   }
 
   Future<void> _openForm({Map<String, dynamic>? existing}) async {
-    final spec = widget.spec;
-    final formKey = GlobalKey<FormState>();
-    final serverErrors = ServerErrors();
-    final nameController = TextEditingController(text: existing?['name'] as String? ?? '');
-    final descriptionController = TextEditingController(text: existing?['description'] as String? ?? '');
-    final sortOrderController = TextEditingController(text: (existing?['sortOrder'] ?? 1).toString());
-
-    final saved = await showGbDialog<bool>(
+    final saved = await showDialog<bool>(
       context: context,
-      title: existing == null ? 'Dodaj — ${spec.label}' : 'Uredi — ${spec.label}',
-      width: 480,
-      child: Form(
-        key: formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: 'Naziv'),
-              validator: serverErrors.wrap('name', (v) => Validators.lengthRange(v, spec.nameMin, spec.nameMax, label: 'Naziv')),
-            ),
-            if (spec.descriptionMode != _DescriptionMode.none) ...[
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: descriptionController,
-                maxLines: 3,
-                decoration: InputDecoration(labelText: spec.descriptionMode == _DescriptionMode.required ? 'Opis' : 'Opis (opciono)'),
-                validator: serverErrors.wrap(
-                  'description',
-                  (v) => spec.descriptionMode == _DescriptionMode.required
-                      ? Validators.lengthRange(v, 1, spec.descriptionMax, label: 'Opis')
-                      : Validators.optionalLengthRange(v, 0, spec.descriptionMax, label: 'Opis'),
-                ),
-              ),
-            ],
-            if (spec.hasSortOrder) ...[
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: sortOrderController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Redoslijed prikaza (1-100)'),
-                validator: serverErrors.wrap('sortOrder', (v) => Validators.numberRange(v, 1, 100, label: 'Redoslijed', isInt: true)),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Odustani')),
-        const SizedBox(width: 8),
-        ElevatedButton(
-          onPressed: () async {
-            if (!formKey.currentState!.validate()) return;
-            final payload = <String, dynamic>{'name': nameController.text.trim()};
-            if (spec.descriptionMode != _DescriptionMode.none) {
-              payload['description'] = descriptionController.text.trim().isEmpty ? null : descriptionController.text.trim();
-            }
-            if (spec.hasSortOrder) {
-              payload['sortOrder'] = int.tryParse(sortOrderController.text.trim()) ?? 1;
-            }
-            try {
-              if (existing == null) {
-                await _service.create(spec.resource, payload);
-              } else {
-                await _service.update(spec.resource, existing['id'] as int, payload);
-              }
-              if (!mounted) return;
-              Navigator.of(context).pop(true);
-            } catch (error) {
-              final apiError = ApiError.from(error, fallback: 'Čuvanje nije uspjelo.');
-              serverErrors.apply(apiError.fieldErrors);
-              formKey.currentState!.validate();
-              if (!mounted) return;
-              showErrorSnack(context, apiError.message);
-            }
-          },
-          child: const Text('SAČUVAJ'),
-        ),
-      ],
+      builder: (_) => _ReferenceItemDialog(spec: widget.spec, service: _service, existing: existing),
     );
-
-    nameController.dispose();
-    descriptionController.dispose();
-    sortOrderController.dispose();
 
     if (saved == true) {
       if (!mounted) return;
-      showSuccessSnack(context, existing == null ? '${spec.label} — stavka je dodana.' : '${spec.label} — stavka je sačuvana.');
+      showSuccessSnack(context,
+          existing == null ? '${widget.spec.label} — stavka je dodana.' : '${widget.spec.label} — stavka je sačuvana.');
       _load();
     }
   }
@@ -296,6 +217,117 @@ class _ReferenceTabState extends State<_ReferenceTab> with AutomaticKeepAliveCli
                     ),
         ),
       ],
+    );
+  }
+}
+
+/// The DODAJ/UREDI form for one šifarnik entry. Its own [StatefulWidget] so
+/// its [TextEditingController]s are created in `initState` and disposed in
+/// `dispose` — called only once the dialog route is actually removed,
+/// unlike disposing them by hand right after `await showDialog(...)`
+/// returns, which raced the dialog's exit transition and threw "A
+/// TextEditingController was used after being disposed."
+class _ReferenceItemDialog extends StatefulWidget {
+  const _ReferenceItemDialog({required this.spec, required this.service, this.existing});
+
+  final _ResourceSpec spec;
+  final ReferenceDataService service;
+  final Map<String, dynamic>? existing;
+
+  @override
+  State<_ReferenceItemDialog> createState() => _ReferenceItemDialogState();
+}
+
+class _ReferenceItemDialogState extends State<_ReferenceItemDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _serverErrors = ServerErrors();
+  late final _nameController = TextEditingController(text: widget.existing?['name'] as String? ?? '');
+  late final _descriptionController = TextEditingController(text: widget.existing?['description'] as String? ?? '');
+  late final _sortOrderController = TextEditingController(text: (widget.existing?['sortOrder'] ?? 1).toString());
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _sortOrderController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    final spec = widget.spec;
+    final payload = <String, dynamic>{'name': _nameController.text.trim()};
+    if (spec.descriptionMode != _DescriptionMode.none) {
+      payload['description'] = _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim();
+    }
+    if (spec.hasSortOrder) {
+      payload['sortOrder'] = int.tryParse(_sortOrderController.text.trim()) ?? 1;
+    }
+    try {
+      if (widget.existing == null) {
+        await widget.service.create(spec.resource, payload);
+      } else {
+        await widget.service.update(spec.resource, widget.existing!['id'] as int, payload);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      final apiError = ApiError.from(error, fallback: 'Čuvanje nije uspjelo.');
+      setState(() => _serverErrors.apply(apiError.fieldErrors));
+      _formKey.currentState!.validate();
+      showErrorSnack(context, apiError.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final spec = widget.spec;
+    final existing = widget.existing;
+    return GbDialog(
+      title: existing == null ? 'Dodaj — ${spec.label}' : 'Uredi — ${spec.label}',
+      width: 480,
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Odustani')),
+        const SizedBox(width: 8),
+        ElevatedButton(onPressed: _submit, child: const Text('SAČUVAJ')),
+      ],
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _nameController,
+              decoration: const InputDecoration(labelText: 'Naziv'),
+              validator: _serverErrors.wrap('name', (v) => Validators.lengthRange(v, spec.nameMin, spec.nameMax, label: 'Naziv')),
+            ),
+            if (spec.descriptionMode != _DescriptionMode.none) ...[
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _descriptionController,
+                maxLines: 3,
+                decoration: InputDecoration(labelText: spec.descriptionMode == _DescriptionMode.required ? 'Opis' : 'Opis (opciono)'),
+                validator: _serverErrors.wrap(
+                  'description',
+                  (v) => spec.descriptionMode == _DescriptionMode.required
+                      ? Validators.lengthRange(v, 1, spec.descriptionMax, label: 'Opis')
+                      : Validators.optionalLengthRange(v, 0, spec.descriptionMax, label: 'Opis'),
+                ),
+              ),
+            ],
+            if (spec.hasSortOrder) ...[
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _sortOrderController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Redoslijed prikaza (1-100)'),
+                validator: _serverErrors.wrap('sortOrder', (v) => Validators.numberRange(v, 1, 100, label: 'Redoslijed', isInt: true)),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
