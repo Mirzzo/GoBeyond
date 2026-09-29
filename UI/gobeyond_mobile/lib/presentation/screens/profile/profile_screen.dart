@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/auth/auth_scope.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/date_of_birth_range.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/server_errors.dart';
 import '../../../core/utils/validators.dart';
@@ -64,6 +65,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _saving = false;
   bool _uploadingPhoto = false;
   String? _formError;
+  String? _dobError;
+  final _scrollController = ScrollController();
 
   late Future<_LookupData> _lookupFuture;
 
@@ -122,19 +125,29 @@ class _ProfileScreenState extends State<ProfileScreen>
     _heightController.dispose();
     _experienceController.dispose();
     _goalDescriptionController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _pickDateOfBirth() async {
     final now = DateTime.now();
+    // The picker only offers dates the backend accepts; a saved date that
+    // has since fallen outside that range opens at the nearest valid date.
+    final range = DateOfBirthRange(now);
     final picked = await showDatePicker(
       context: context,
-      initialDate: _dateOfBirth ?? DateTime(now.year - 20),
-      firstDate: DateTime(now.year - 100),
-      lastDate: DateTime(now.year - 10),
+      initialDate: range
+          .clamp(_dateOfBirth ?? DateTime(now.year - 20, now.month, now.day)),
+      firstDate: range.first,
+      lastDate: range.last,
       helpText: 'Odaberite datum rođenja',
     );
-    if (picked != null && mounted) setState(() => _dateOfBirth = picked);
+    if (picked != null && mounted) {
+      setState(() {
+        _dateOfBirth = picked;
+        _dobError = null;
+      });
+    }
   }
 
   Future<void> _changePhoto() async {
@@ -180,11 +193,14 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Future<void> _save() async {
     clearServerErrors();
-    setState(() => _formError = null);
+    setState(() {
+      _formError = null;
+      _dobError = null;
+    });
 
     final valid = _formKey.currentState?.validate() ?? false;
     if (_dateOfBirth == null) {
-      setState(() => _formError = 'Datum rođenja je obavezan.');
+      setState(() => _dobError = 'Datum rođenja je obavezan.');
     }
     if (!valid || _dateOfBirth == null) return;
 
@@ -221,8 +237,16 @@ class _ProfileScreenState extends State<ProfileScreen>
       final apiError = ApiException.from(error);
       if (apiError.errors.isNotEmpty) {
         applyServerErrors(apiError.errors, _formKey);
+        setState(() => _dobError ??= serverError('dateOfBirth'));
       }
       setState(() => _formError = apiError.message);
+      // Field errors render near the top of a long form; the user is
+      // usually scrolled down near SPREMI IZMJENE, so they'd otherwise only
+      // see the generic message below and never notice which field is wrong.
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -266,6 +290,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 final lookups = snapshot.data!;
 
                 return ListView(
+                  controller: _scrollController,
                   padding: const EdgeInsets.all(20),
                   children: [
                     Center(
@@ -369,10 +394,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                               onTap: _pickDateOfBirth,
                               borderRadius: BorderRadius.circular(18),
                               child: InputDecorator(
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: 'Datum rođenja',
+                                  errorText: _dobError,
                                   suffixIcon:
-                                      Icon(Icons.calendar_month_rounded),
+                                      const Icon(Icons.calendar_month_rounded),
                                 ),
                                 child: Text(_dateOfBirth == null
                                     ? 'Odaberite datum'
@@ -386,6 +412,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                               value: _genderId,
                               onChanged: (v) => setState(() => _genderId = v),
                               errorText: serverError('genderId'),
+                              requiredMessage: 'Odaberite spol.',
                             ),
                             const SizedBox(height: 12),
                             TextFormField(
@@ -397,7 +424,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   labelText: 'Tjelesna težina (kg)'),
                               validator: (v) =>
                                   Validators.numberRange(v,
-                                      min: 30, max: 300, label: 'Težina') ??
+                                      min: 30,
+                                      max: 300,
+                                      label: 'Težina',
+                                      gender: LabelGender.feminine) ??
                                   serverError('client.weightKg'),
                             ),
                             const SizedBox(height: 12),
@@ -410,7 +440,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   labelText: 'Visina (cm)'),
                               validator: (v) =>
                                   Validators.numberRange(v,
-                                      min: 100, max: 250, label: 'Visina') ??
+                                      min: 100,
+                                      max: 250,
+                                      label: 'Visina',
+                                      gender: LabelGender.feminine) ??
                                   serverError('client.heightCm'),
                             ),
                             const SizedBox(height: 12),
@@ -421,6 +454,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                               onChanged: (v) =>
                                   setState(() => _fitnessLevelId = v),
                               errorText: serverError('client.fitnessLevelId'),
+                              requiredMessage: 'Odaberite nivo fizičke spreme.',
                             ),
                             const SizedBox(height: 12),
                             TextFormField(
@@ -444,6 +478,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                               onChanged: (v) =>
                                   setState(() => _fitnessGoalId = v),
                               errorText: serverError('client.fitnessGoalId'),
+                              requiredMessage: 'Odaberite fitness cilj.',
                             ),
                             const SizedBox(height: 12),
                             LookupDropdown(
@@ -468,7 +503,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                                       min: 0,
                                       max: 500,
                                       label: 'Opis cilja',
-                                      optional: true) ??
+                                      optional: true,
+                                      gender: LabelGender.masculine) ??
                                   serverError('client.goalDescription'),
                             ),
                             if (_formError != null) ...[
@@ -598,8 +634,8 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
               controller: _currentController,
               obscureText: true,
               decoration: const InputDecoration(labelText: 'Trenutna lozinka'),
-              validator: (v) =>
-                  Validators.required(v, label: 'Trenutna lozinka'),
+              validator: (v) => Validators.required(v,
+                  label: 'Trenutna lozinka', gender: LabelGender.feminine),
             ),
             const SizedBox(height: 12),
             TextFormField(

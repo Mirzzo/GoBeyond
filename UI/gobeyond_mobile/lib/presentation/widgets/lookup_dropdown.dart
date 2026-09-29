@@ -16,6 +16,7 @@ class LookupDropdown extends StatelessWidget {
     this.allowEmpty = false,
     this.emptyLabel = 'Nije bitno',
     this.errorText,
+    this.requiredMessage,
   });
 
   final String label;
@@ -25,6 +26,11 @@ class LookupDropdown extends StatelessWidget {
   final bool allowEmpty;
   final String emptyLabel;
   final String? errorText;
+
+  /// Overrides the default "$label je obavezno." message (which reads wrong
+  /// for a masculine/feminine label) with exact backend wording, e.g.
+  /// "Odaberite spol."
+  final String? requiredMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +52,10 @@ class LookupDropdown extends StatelessWidget {
       onChanged: onChanged,
       validator: allowEmpty
           ? null
-          : (v) => Validators.dropdownRequired(v, label: label),
+          : (v) => v == null
+              ? (requiredMessage ??
+                  Validators.dropdownRequired(v, label: label))
+              : null,
     );
   }
 }
