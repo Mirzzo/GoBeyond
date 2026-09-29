@@ -1,13 +1,15 @@
 using GoBeyond.API.Validation;
 using GoBeyond.Core.Exceptions;
 using GoBeyond.Infrastructure.Configuration;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 
 namespace GoBeyond.API.Middleware;
 
 /// <summary>
 /// Mapira domenske izuzetke na HTTP status i jedinstven oblik odgovora iz API ugovora:
-/// 400 { message, errors }, 401/403/404/409 { message }, 500 { message }.
+/// 400 { message, errors }, 401/403/404/409 { message }, 500 { message }. Zahtjev koji SQL Server prekine zbog istovremene
+/// izmjene istih podataka (deadlock, istek čekanja na zaključavanje) je 400 sa porukom da se pokuša ponovo, ne 500.
 /// </summary>
 public sealed class GlobalExceptionMiddleware(
     RequestDelegate next,
@@ -15,6 +17,10 @@ public sealed class GlobalExceptionMiddleware(
     ILogger<GlobalExceptionMiddleware> logger)
 {
     public const string ServerErrorMessage = "Došlo je do greške na serveru. Pokušajte ponovo.";
+    public const string ConcurrentChangeMessage = "Isti podaci se upravo mijenjaju u drugom zahtjevu. Pokušajte ponovo.";
+
+    /// <summary>SQL Server greške 1205 (transakcija izabrana kao žrtva deadlock-a) i 1222 (istek čekanja na zaključavanje).</summary>
+    private static readonly int[] LockConflictErrors = [1205, 1222];
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -31,6 +37,8 @@ public sealed class GlobalExceptionMiddleware(
             var (status, body) = Map(ex);
             if (status >= 500)
                 logger.LogError(ex, "Unhandled exception for {Method} {Path}.", context.Request.Method, context.Request.Path);
+            else if (IsLockConflict(ex))
+                logger.LogWarning(ex, "{Method} {Path} -> {Status}: SQL Server lock conflict.", context.Request.Method, context.Request.Path, status);
             else
                 logger.LogInformation("{Method} {Path} -> {Status}: {Message}", context.Request.Method, context.Request.Path, status, ex.Message);
 
@@ -53,6 +61,16 @@ public sealed class GlobalExceptionMiddleware(
         BadHttpRequestException ex when ex.StatusCode == StatusCodes.Status413PayloadTooLarge =>
             (StatusCodes.Status400BadRequest, new ErrorResponse(uploadOptions.Value.RequestTooLargeMessage)),
         BadHttpRequestException => (StatusCodes.Status400BadRequest, new ErrorResponse("Zahtjev nije ispravnog formata.")),
+        _ when IsLockConflict(exception) => (StatusCodes.Status400BadRequest, new ErrorResponse(ConcurrentChangeMessage)),
         _ => (StatusCodes.Status500InternalServerError, new ErrorResponse(ServerErrorMessage))
     };
+
+    /// <summary>EF Core grešku baze prosljeđuje direktno (ExecuteUpdate) ili umotanu (DbUpdateException pri SaveChanges).</summary>
+    private static bool IsLockConflict(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+            if (current is SqlException sql && LockConflictErrors.Contains(sql.Number))
+                return true;
+        return false;
+    }
 }
