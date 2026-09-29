@@ -141,6 +141,32 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
 - Testiranje: workflow 1 (7 testera: payments-api, notifications-api, background-jobs na izolovanoj instanci, api-security-auth, api-features, desktop, code-audit-p1 + verifikatori) i workflow 2 (E2E na emulatoru sa korisnikovim nalogom: M1 plaćanja → M2 notifikacije/plan/poruke → M3 produženje + podsjetnik pred istek + verifikator).
 - Zaostali kontejner `epic_jepsen` (stari email-consumer bez RabbitMQ konfiguracije) — brisanje nije dozvoljeno agentu; korisnik ga može ukloniti sa `docker rm -f epic_jepsen`.
 
+### Runda testiranja 1 (API, background jobovi, desktop, code audit) — završena
+- 7 testera, ~270 test slučajeva (payments-api 39, notifications-api 52, background-jobs 21, api-security-auth 48, api-features 46, desktop 43, code-audit-p1 19). Svaki nalaz nezavisno reprodukovao verifikator.
+- 53 prijave → nakon deduplikacije ~35 jedinstvenih bugova; 3 odbačena kao "nije bug" (izvještaj mentora bez obrisanih mentora, ponovna objava plana bez throttle-a, supresija poddomena — ipak se popravlja kao hardening).
+- Najvažnije (major): admin otkazivanje plaćenog zahtjeva (AwaitingMentor) ne vraća novac; Stripe timeout u lifecycle servisu gasi cijeli API; race condition-i (duple otvorene pretplate, accept+reject istovremeno, confirm vs istek/otkaz); zamijenjeni ili stari PaymentIntent ostaje plativ a nikad se ne vraća; admin reset lozinke ne poništava access token; degradirani mentor (uloga promijenjena u klijenta) i dalje vidljiv i plativ; desktop dijalozi se ruše (dispose kontrolera).
+- Minor/trivial: dvostruka tačka iza datuma u obavijestima, datumi u UTC umjesto lokalne zone, muški rod u tekstovima, email-consumer (duplikat nakon pada, zastoj nakon brisanja queue-a, prazan email, poddomene), refresh token race, search >4000 znakova → 500, trim prije validacije, treninzi nakon kraja saradnje, snapshot plana za prošli mjesec, cijena sa 3 decimale, desktop obavijesti bez osvježavanja, PDF "sačuvan" i kad je otkazano, prikaz valute "usd"/"BAM".
+- Popravke (workflow fix-round1, zasebni git worktree-i): B1 plaćanja/pretplate/tekstovi (Opus), B2 auth/sigurnost/vidljivost mentora (Opus), B3 validacije/planovi/poruke/napredak (Sonnet), E1 email-consumer (Sonnet), D1 desktop (Sonnet); svaki sa adversarial pre-reviewom, konačnu ocjenu daje glavni agent.
+
+### E2E na emulatoru (korisnikov nalog) — završen
+- M1 (registracija, mentori, plaćanje): 13 pass / 3 fail; M2 (notifikacije, plan, poruke, napredak, sistemska obavijest, profil): 30 pass / 4 fail / 1 blocked; M3 (podsjetnik pred istek, produženje, recenzija, perzistencija sesije): 9 pass.
+- Stripe PaymentSheet na emulatoru radi: zatvaranje sheet-a → NASTAVI PLAĆANJE, odbijena kartica 9995, 3DS neuspjeh pa uspjeh 3155, produženje 4242 (+30 dana od starog kraja). Jedna uplata po pokušaju, bez siročadi. Podsjetnik pred istek stigao jednom i nije se ponovio.
+- Emailovi na korisnikov Gmail: 9 poslanih (dobrodošlica, plaćanje, prihvaćen zahtjev, plan objavljen, plan ažuriran, sistemska obavijest, podsjetnik pred istek, 2x produženje). **Korisnik potvrdio: svi stigli, ali u Spam folder** (novi Gmail pošiljalac + automatski sadržaj o plaćanju; tijelo je text/plain base64). Plan: HTML + text multipart i quoted-printable; korisnik može označiti "Nije spam".
+- 31 nalaz (uglavnom mobile UI/tekstovi): detalj aktivne pretplate nedostupan (major), ekrani (obavijesti, pretplata, plan, chat) se ne osvježavaju, engleski Material/Stripe tekstovi, gramatika (rod, padeži, množina), Back na sličnim mentorima; backend: PlanUpdated throttle nakon objave, NewMessage obavijest ostaje nepročitana, "Nova poruka od Haris" (padež), "Specijalizovan" za mentorice.
+- Stanje korisnikovog naloga: aktivna pretplata kod `mentor` do 30.11.2026., objavljen plan v4, recenzija 5, 3 uspješne uplate (test mod).
+
+### Review popravki — runda 1 (glavni agent, prag > 8)
+| Grupa | Pre-review | Ocjena | Ishod |
+|---|---|---|---|
+| B1 plaćanja/pretplate/tekstovi (Opus; prekinut limitom, nastavljen) | 9 | **9/10** | PRIHVAĆENO — row lock + Status concurrency token, filtrirani unique indeks, povrat pri admin otkazivanju, otkazivanje zastarjelih PaymentIntent-a, usklađivanje Failed uplata, produženje prije isteka, Stripe timeout ne gasi API, webhook 400, tekstovi (zona, tačke, rod). 243 testa. Commit `b529f99`, migracija preimenovana u `SubscriptionConsistency` (`b081bdb`) |
+| B3 validacije/planovi/poruke/napredak (Sonnet) | 8.5 | **8.5/10** | PRIHVAĆENO — trim prije validacije, najviše 2 decimale cijene, mentor ne vidi neplaćene niti, treninzi samo za aktivnu saradnju, snapshot samo za tekući mjesec. Commitovi `deddc97`..`a51ebac` |
+| B2 auth/sigurnost (Opus) | 8 | **8/10** | DORADA — promjena lozinke odjavljuje i uređaj pozivaoca (aplikacije to ne podržavaju), refresh token nije vezan za security stamp, invalidacija nije atomična |
+| D1 desktop (Sonnet) | 8 | **8/10** | DORADA — setState nakon dispose u dijalozima, race kod pollinga obavijesti, "KM" u labelama, testovi koji ne padaju bez popravke, neatomični commitovi |
+| E1 email-consumer (Sonnet) | 6 → 8 | **8/10** | DORADA (2. put) — duplikat kad se redelivery desi dok slanje traje, IDN zaobilazi supresiju, stil komentara; + HTML/text multipart zbog Spam-a |
+- Backend na masteru nakon B1+B3: 274/274 testova. Ugovor ažuriran (v1.6).
+- Verifikacija E2E nalaza: 26 stvarnih mobile/backend bugova (2 major: detalj aktivne pretplate nedostupan), 5 duplikata, 1 nije bug (PlanUpdated throttle namjerno počinje objavom).
+- Runda 2 (u toku): B2R, D1R, E1R dorade + M1 (mobile, 26 nalaza, provjera na emulatoru) + B4 (NewMessage obavijesti, "Specijalizovan", lock kod auto-accepta, reminder race, zona za buduće mjesece, decimalni zarez).
+
 ## Sljedeći koraci (korisnik)
 
 1. **Stripe ključevi za ocjenjivača:** ključevi su lokalno u `.env` (29.09.2026.), ali `.env` se ne commituje. Treba odlučiti kako ih ocjenjivač dobija (npr. `.env` u zip-u sa lozinkom, ili prema uputama za predaju).

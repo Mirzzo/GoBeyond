@@ -14,6 +14,8 @@ Verzija 1 (27.09.2026). Backend implementira tačno ovaj ugovor. Ako backend mor
   - `401` / `403` / `404` / `409` vraćaju `{ "message": "<poruka na bosanskom>" }`.
   - `500` vraća `{ "message": "Došlo je do greške na serveru. Pokušajte ponovo." }`.
 - Sve poruke koje backend vraća su na **bosanskom (ijekavica)** i konkretne (npr. "Korisničko ime je već zauzeto.").
+- Slobodni tekst (razlozi odbijanja/otkazivanja, upitnik, opisi dana plana, motivacijska poruka, unosi napretka, komentar recenzije, naslov i sadržaj obavijesti, biografija, poruka) se trimuje **prije** provjere dužine: tekst dopunjen razmacima do minimuma vraća `400`.
+- Datumi u tekstovima obavijesti i emailova su u vremenskoj zoni platforme (`Lifecycle:TimeZoneId`, podrazumijevano Europe/Sarajevo), u formatu `dd.MM.yyyy.`.
 - Uloge: `Admin`, `Mentor`, `Client`. Politike: `AdminOnly`, `MentorOnly`, `ClientOnly`, `MentorOrAdmin`.
 
 ## 1. Model podataka (finalni)
@@ -109,7 +111,7 @@ Klijenti:
 
 Pretplate:
 - `GET /api/admin/subscriptions?search=&status=` → `[AdminSubscription]`, gdje je `AdminSubscription = { id, clientFullName, mentorFullName, trainingTypeName, status, price, currency, createdAt, startDate, endDate, statusReason }`.
-- `PUT /api/admin/subscriptions/{id}/cancel` → `{ reason (5–300) }` → `AdminSubscription`. Obavještava klijenta i mentora.
+- `PUT /api/admin/subscriptions/{id}/cancel` → `{ reason (5–300) }` → `AdminSubscription`. Dozvoljeno za PendingPayment, AwaitingMentor i Active. Plaćen zahtjev koji mentor nije prihvatio (AwaitingMentor) se vraća preko Stripe-a (Payment `Refunded`), a obavijest klijentu navodi vraćeni iznos; ako povrat ne uspije → `400` "Otkazivanje nije moguće: povrat uplate klijentu nije uspio. Pokušajte ponovo." i ništa se ne mijenja. Active i PendingPayment se otkazuju bez povrata. Nedovršena uplata se zatvara na Stripe-u (naplaćena se vraća, plativ PaymentIntent se otkazuje). Klijent uvijek dobija obavijest, a mentor samo ako je zahtjev vidio (pretplata nije bila PendingPayment).
 
 Izvještaji (`year`/`month` su opcioni, default je tekući mjesec):
 - `GET /api/admin/reports/mentors?search=&trainingTypeId=&year=&month=` → `{ items: [MentorReportRow], totals: { activeSubscribers, monthlyEarnings, totalEarnings, timeOnPlatformMinutes, mentorCount } , year, month, currency }`, gdje je `MentorReportRow = { mentorProfileId, fullName, trainingTypeName, activeSubscribers, totalSubscribers, monthlyEarnings, totalEarnings, timeOnPlatformMinutes, averageRating }`.
@@ -136,7 +138,7 @@ Sistemske obavijesti:
   ```
 - `PUT /api/mentors/me/collaboration-requests/{subscriptionId}/accept` → `CollaborationRequest`. Subscription postaje Active sa `startDate = sada` i `endDate = sada + 30 dana`. Klijent dobija obavijest. Idempotentno ako je već Active.
 - `PUT /api/mentors/me/collaboration-requests/{subscriptionId}/reject` → `{ reason (10–500) }` → `{ message }`. Status Rejected, uplata se refundira preko Stripe-a (Payment.status = Refunded), klijent dobija obavijest.
-- `GET /api/mentors/me/subscribers?search=&status=` → `[Subscriber]`, gdje je `Subscriber = { subscriptionId, clientFullName, clientPhotoUrl, status, startDate, endDate, planId?, planStatus?, lastTrainingAt? }`.
+- `GET /api/mentors/me/subscribers?search=&status=` → `[Subscriber]`, gdje je `Subscriber = { subscriptionId, clientFullName, clientPhotoUrl, status, startDate, endDate, planId?, planStatus?, lastTrainingAt? }`. Mentor vidi samo plaćene pretplate (`paidAt` postavljen): neplaćena pretplata se ne vraća ni sa `?status=` filterom, a `GET .../subscribers/{id}` i `GET .../collaboration-requests/{id}` za nju vraćaju `404`.
 - `GET /api/mentors/me/subscribers/{subscriptionId}` → `ClientDescription + { startDate, endDate, sessions: [TrainingSessionItem], progress: [ProgressEntryItem] }`.
 
 Planovi (`/api/training-plans`):
@@ -171,22 +173,22 @@ Pretplate i plaćanje:
 - `POST /api/subscriptions` → `{ mentorProfileId, questionnaire: { primaryGoal, timeCommitment, healthIssues, medications, weeklySessions, outsideActivity } }` → `Subscription` (PendingPayment). 409 ako klijent već ima PendingPayment/AwaitingMentor/Active pretplatu: "Već imate aktivnu ili započetu saradnju sa mentorom." Postojeću PendingPayment pretplatu kod istog mentora vraća umjesto 409.
 - `GET /api/subscriptions/my?status=` → `[Subscription]`, gdje je `Subscription = { id, mentorProfileId, mentorFullName, mentorPhotoUrl, trainingTypeName, status, price, currency, createdAt, startDate, endDate, statusReason, canReview, reviewId?, canRenew, canCancel }`.
 - `GET /api/subscriptions/my/{id}` → `Subscription + { questionnaire, payments: [{ amount, currency, purpose, status, createdAt, paidAt }] }`.
-- `POST /api/subscriptions/{id}/cancel` → `Subscription`. Dozvoljeno iz PendingPayment ili Active, bez povrata novca. Mentor dobija obavijest.
-- `POST /api/payments/create-intent` → `{ subscriptionId }` → `{ paymentId, clientSecret, publishableKey, amount, currency, purpose }`. Purpose je Initial za PendingPayment i Renewal za Active (produženje +30 dana).
+- `POST /api/subscriptions/{id}/cancel` → `Subscription`. Dozvoljeno iz PendingPayment ili Active, bez povrata novca. Nedovršena uplata se zatvara na Stripe-u: plativ PaymentIntent se otkazuje, a već naplaćen (potvrda nije stigla) se automatski vraća (`PaymentRefunded`). Ako Stripe nije dostupan → `400` "Komunikacija sa Stripe servisom nije uspjela. Pokušajte ponovo." i ništa se ne mijenja. Mentor dobija obavijest samo za Active.
+- `POST /api/payments/create-intent` → `{ subscriptionId }` → `{ paymentId, clientSecret, publishableKey, amount, currency, purpose }`. Purpose je Initial za PendingPayment i Renewal za Active (produženje +30 dana). Istovremeni zahtjevi za istu pretplatu se izvršavaju jedan za drugim i dobijaju isti PaymentIntent. Zastario PaymentIntent (promijenjena cijena ili stariji od pola `Lifecycle:PaymentReconcileWindowHours`) se otkazuje na Stripe-u i kreira se novi; ako je u međuvremenu plaćen, primjenjuje se i vraća `409` "Ova uplata je već uspješno izvršena. Osvježite prikaz pretplate.". Stripe `409` (isti zahtjev još u obradi) → `409` "Prethodno plaćanje se još obrađuje. Pokušajte ponovo za nekoliko trenutaka."
 - `POST /api/payments/{paymentId}/confirm` → `Subscription`. Backend dohvata PaymentIntent sa Stripe-a i tek kad je `succeeded` postavlja Payment Succeeded. Initial prebacuje pretplatu u AwaitingMentor i šalje mentoru obavijest NewCollaborationRequest. Renewal produžava `endDate` za 30 dana. Neuspjeh vraća 400 "Plaćanje nije završeno. Pokušajte ponovo."
-- `POST /api/payments/webhook` (anon, Stripe potpis se obavezno verifikuje) — ista obrada, idempotentno.
+- `POST /api/payments/webhook` (anon, Stripe potpis se obavezno verifikuje) — ista obrada, idempotentno. Potpisan payload koji nije JSON → `400` "Neispravan Stripe webhook payload."; JSON bez objekta `data.object` se ignoriše (`200`).
 - Nema demo/lažnog plaćanja. Bez konfigurisanog Stripe ključa `create-intent` vraća 400 "Stripe plaćanje nije konfigurisano na serveru."
 
 Plan i treninzi:
 - `GET /api/training-plans/my-current` → `PlanDetail` za zadnji Published ili Archived plan tekuće Active pretplate. Ako takav ne postoji, uzima se plan zadnje Cancelled pretplate prekinute brisanjem mentora. Inače 404 "Još nemate objavljen plan."
-- `POST /api/training-plans/{planId}/days/{dayOfWeek}/sessions` → `{ repetitions (1–10000), note? }` → `TrainingSessionItem`. Dozvoljeno samo za Published plan.
+- `POST /api/training-plans/{planId}/days/{dayOfWeek}/sessions` → `{ repetitions (1–10000), note? }` → `TrainingSessionItem`. Dozvoljeno samo za Published plan aktivne saradnje (`canEdit = true`: pretplata Active i mentor nije obrisan); inače `400` "Saradnja je završena, pa se treninzi više ne mogu evidentirati."
 - `GET /api/training-plans/{planId}/sessions` (klijent vlasnik ili mentor vlasnik) → `[TrainingSessionItem]`, gdje je `TrainingSessionItem = { id, dayOfWeek, dayName, completedAt, repetitions, note }`.
 
 Napredak (historija treninga):
 - `GET /api/progress/years` → `[int]` (godine sa unosima + tekuća godina).
 - `GET /api/progress?year=` → `[ProgressEntryItem]`, gdje je `ProgressEntryItem = { id, year, month, monthName, photoUrl, weightKg, measurements, strength, conditioning, hasPlanSnapshot, createdAt, updatedAt }`.
 - `GET /api/progress/{year}/{month}` → `ProgressEntryItem` ili 404.
-- `PUT /api/progress/{year}/{month}` → `{ weightKg, measurements, strength, conditioning }` → `ProgressEntryItem` (upsert). Pri kreiranju se snima JSON snapshot trenutnog plana. Budući mjesec vraća 400.
+- `PUT /api/progress/{year}/{month}` → `{ weightKg, measurements, strength, conditioning }` → `ProgressEntryItem` (upsert). Pri kreiranju se snima JSON snapshot trenutnog plana, ali samo za unos tekućeg mjeseca; za prošle mjesece snapshot ostaje prazan i `GET .../plan` vraća `404`. Budući mjesec vraća 400.
 - `POST /api/progress/{year}/{month}/photo` (multipart `file`) → `ProgressEntryItem`. Unos mora postojati.
 - `GET /api/progress/{year}/{month}/plan` → `PlanDetail` iz snapshota ("HISTORIJA PLANA") ili 404.
 - `GET /api/progress/chart` → `[{ year, month, weightKg }]` za grafikon.
@@ -199,7 +201,7 @@ Recenzije:
 
 - Notifikacije: `GET /api/notifications?unreadOnly=&search=` → `[{ id, title, body, type, isRead, createdAt }]`. `PUT /api/notifications/{id}/read`, `PUT /api/notifications/read-all`, `GET /api/notifications/unread-count` → `{ count }`.
 - Poruke:
-  - `GET /api/messages/threads?search=` → `[{ subscriptionId, otherPartyName, otherPartyPhotoUrl, lastMessage, lastMessageAt, unreadCount, canSend }]`. Mentor vidi pretplate AwaitingMentor/Active/Expired/Cancelled, klijent svoje.
+  - `GET /api/messages/threads?search=` → `[{ subscriptionId, otherPartyName, otherPartyPhotoUrl, lastMessage, lastMessageAt, unreadCount, canSend }]`. Mentor vidi pretplate AwaitingMentor/Active/Expired/Cancelled koje je klijent platio (`paidAt` postavljen), klijent svoje.
   - `GET /api/messages/threads/{subscriptionId}` → `[{ id, content, sentAt, isMine, senderName }]` i označava tuđe poruke pročitanim.
   - `POST /api/messages/threads/{subscriptionId}` → `{ content }` → poruka. Dozvoljeno dok je pretplata AwaitingMentor ili Active. Druga strana dobija NewMessage notifikaciju (in-app).
 - Aktivnost: `POST /api/activity/heartbeat` → 204. Desktop i mobile ga zovu svakih 60 s dok je aplikacija aktivna i korisnik prijavljen. Backend dodaje najviše 90 s po pozivu u `UserActivity`.
@@ -209,8 +211,8 @@ Recenzije:
 - API upisuje `OutboxMessage` u istoj transakciji kao domensku promjenu. `OutboxDispatcher` (hosted service u API-ju) objavljuje `EmailNotificationMessage` na queue `gobeyond.notifications`.
 - `GoBeyond.EmailConsumer` (poseban projekat i kontejner) konzumira poruke i šalje email preko SMTP-a (Mailpit u docker-compose podrazumijevano; opcionalno Gmail preko `.env`, vidi Changelog v1.5). Nakon 5 neuspjelih pokušaja poruka ide u dead-letter ili se označava neuspjelom, bez beskonačnog requeue-a. Kad SMTP host nije Mailpit, primaoci na domenama iz `Smtp:SuppressedRecipientDomains` (npr. seed korisnici na `gobeyond.ba`, §10) se ne šalju — samo loguje i ack-uje (Changelog v1.5).
 - `SubscriptionLifecycleService` (hosted service u API-ju, interval iz konfiguracije) radi sljedeće:
-  - Prvo usklađuje nepotvrđene Stripe uplate (Pending starije od 5 min, mlađe od 48 h): naplaćene primjenjuje ili automatski vraća, otkazane označava `Failed` (vidi Changelog v1.4).
-  - Active pretplate s prošlim `endDate` prebacuje u Expired i obavještava klijenta i mentora ("istek saradnje").
+  - Prvo usklađuje nepotvrđene Stripe uplate (Pending i Failed, starije od 5 min, mlađe od 48 h): naplaćene primjenjuje ili automatski vraća, otkazane označava `Failed`, a plativ PaymentIntent koji se više ne smije platiti (zamijenjen, ili pretplata više ne prima uplatu) otkazuje na Stripe-u. Kad Stripe nije dostupan (prekid veze ili timeout), preostale uplate se provjeravaju u sljedećem ciklusu; greška nikad ne gasi API.
+  - Active pretplate s prošlim `endDate` prebacuje u Expired i obavještava klijenta i mentora ("istek saradnje"). Prije isteka na Stripe-u provjerava nepotvrđena produženja (bez obzira na starost): produženje plaćeno prije isteka produžava pretplatu od starog `endDate`, a neplaćeno se otkazuje.
   - Klijentu šalje SubscriptionExpiring 3 dana prije isteka (jednom).
   - Mentoru šalje PlanMissing ako je pretplata Active duže od 48 h bez objavljenog plana (najviše jednom dnevno, "izostanak plana").
   - Klijentu šalje Inactivity nakon 7 dana bez heartbeat-a (najviše jednom sedmično, "neaktivnost").
@@ -279,3 +281,14 @@ Dodatno:
   - **Nova postavka `Smtp:SuppressedRecipientDomains`** (`appsettings.Shared.json`, podrazumijevano `[ "gobeyond.ba" ]`) štiti stvaran SMTP nalog i treće strane od seed/demo adresa (`{username}@gobeyond.ba`, vidi §10) koje nisu prave poštanske adrese pod našom kontrolom. `GoBeyond.EmailConsumer` primjenjuje je SAMO kada `Smtp:Host` NIJE Mailpit (host `mailpit`/`localhost`/`127.0.0.1`): u Mailpitu email nikad ne napušta mašinu, pa je demo poštu seed korisnika i dalje korisno vidjeti tamo bez ograničenja; čim je host stvaran SMTP servis, primalac na navedenoj domeni se ne šalje — poruka se loguje na nivou Information (samo domena, bez tijela/pune adrese) i odmah potvrđuje (ack), bez retry-ja i bez dead-lettera.
   - Gmail specifično (provjereno stvarnom dostavom preko IMAP-a): STARTTLS na portu 587 (`Smtp__UseSsl=true`) sa `System.Net.Mail.SmtpClient` radi bez izmjena; `From` mora biti tačno prijavljeni Gmail nalog (`Smtp__Username`), inače ga Gmail sam prepiše; UTF-8 naslov/tijelo (već postojeći `SubjectEncoding`/`BodyEncoding`) ispravno prikazuje bosanske znakove (č, ć, š, đ, ž). Pogrešna Gmail lozinka/app password baca `SmtpException` koja se loguje bez ikakvih kredencijala i ide kroz postojeći `MaxAttempts`/dead-letter mehanizam (§9) — nema beskonačnog retry-ja.
   - `.env.example` i README dokumentuju Gmail podešavanje (2-Step Verification + App Password) i supresiju; `.env` (gitignored) nije mijenjan u ovom dokumentu.
+- v1.6 — ispravke nakon testiranja (runda 1). Rute i tijela su nepromijenjeni:
+  - **Jedna otvorena saradnja i pri istovremenim zahtjevima:** filtrirani jedinstveni indeks nad `Subscriptions.ClientProfileId` za PendingPayment/AwaitingMentor/Active (migracija `SubscriptionConsistency` otkazuje zaostale neplaćene duplikate sa razlogom "Dvostruka pretplata je automatski otkazana."). Istovremeni `POST /api/subscriptions` vraća postojeću PendingPayment pretplatu ili `409`.
+  - **Prelazi statusa pretplate** (plaćanje, prihvatanje, odbijanje, otkazivanje, brisanje korisnika, istek) se izvršavaju jedan za drugim nad zaključanom pretplatom: istovremeno prihvatanje i odbijanje daju jedan ishod (drugi zahtjev `400`), a otkazivanje se nikad tiho ne poništava.
+  - **Admin otkazivanje AwaitingMentor zahtjeva vraća uplatu** (§5). Tekstovi otkazivanja i brisanja mentora navode stvarno vraćeni iznos.
+  - **Zamijenjeni i prestari PaymentIntent-i** se otkazuju na Stripe-u; usklađivanje provjerava i `Failed` uplate; `Payment.paidAt` je vrijeme naplate na Stripe-u.
+  - **Stripe timeout** `Payments:RequestTimeoutSeconds` (30 s) → `400` "Komunikacija sa Stripe servisom nije uspjela. Pokušajte ponovo."; `SubscriptionLifecycleService` više ne gasi API zbog greške Stripe-a.
+  - **Mentor ne vidi neplaćene pretplate** (lista pretplatnika, detalji, niti poruka) i ne dobija obavijest o otkazivanju neplaćene pretplate.
+  - **Tekstovi obavijesti:** datumi u zoni platforme bez dvostruke tačke, razlog uvijek završava tačkom, rodno neutralne formulacije.
+  - **Validacija:** slobodni tekst se trimuje prije provjere dužine; `mentor.monthlyPrice` smije imati najviše dvije decimale (`400` "Mjesečna cijena može imati najviše dvije decimale.").
+  - **Treninzi** se mogu evidentirati samo dok je saradnja aktivna; **snapshot plana** uz unos napretka samo za tekući mjesec.
+  - Nove postavke: `Payments:RequestTimeoutSeconds` (30), `Lifecycle:TimeZoneId` ("Europe/Sarajevo"), `Lifecycle:StartupDelaySeconds` (20).
