@@ -168,10 +168,13 @@ public sealed class TrainingPlanService(
     {
         EnsureValidDay(dayOfWeek);
         var plan = await db.TrainingPlans.Include(x => x.Days).Include(x => x.ClientProfile)
+                       .Include(x => x.Subscription).Include(x => x.MentorProfile).ThenInclude(x => x.User)
                        .FirstOrDefaultAsync(x => x.Id == planId && x.ClientProfile.UserId == clientUserId, cancellationToken)
                    ?? throw new NotFoundException(DomainTexts.PlanNotFound);
         if (plan.Status != TrainingPlanStatus.Published)
             throw new ValidationException("Trening se može evidentirati samo za objavljen plan.");
+        if (!PlanMapper.CanEdit(plan))
+            throw new ValidationException("Saradnja je završena, pa se treninzi više ne mogu evidentirati.");
 
         var day = plan.Days.FirstOrDefault(x => x.DayOfWeek == dayOfWeek)
                   ?? throw new NotFoundException("Plan nema trening za odabrani dan.");
@@ -236,14 +239,14 @@ public sealed class TrainingPlanService(
         {
             plan.LastUpdateNotifiedAt = now;
             notifications.Notify(client, NotificationType.PlanPublished, "Vaš trening plan je objavljen",
-                $"Mentor {mentorName} je objavio vaš sedmični trening plan (verzija {plan.Version}). Pogledajte ga u meniju \"Moj plan\".",
+                $"Vaš sedmični trening plan je objavljen (mentor {mentorName}, verzija {plan.Version}). Pogledajte ga u meniju \"Moj plan\".",
                 sendEmail: true);
         }
         else if (plan.Status == TrainingPlanStatus.Published && plan.Version != versionBefore && ShouldNotifyUpdate(plan, now))
         {
             plan.LastUpdateNotifiedAt = now;
             notifications.Notify(client, NotificationType.PlanUpdated, "Vaš trening plan je ažuriran",
-                $"Mentor {mentorName} je ažurirao vaš trening plan (verzija {plan.Version}). Pogledajte izmjene u meniju \"Moj plan\".",
+                $"Vaš trening plan je ažuriran (mentor {mentorName}, verzija {plan.Version}). Pogledajte izmjene u meniju \"Moj plan\".",
                 sendEmail: true);
         }
 
