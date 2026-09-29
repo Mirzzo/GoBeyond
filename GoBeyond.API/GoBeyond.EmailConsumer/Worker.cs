@@ -15,8 +15,8 @@ namespace GoBeyond.EmailConsumer;
 /// Neuspjela poruka se ponovo objavljuje sa uvećanim brojačem pokušaja (header x-attempt);
 /// nakon MaxAttempts (5), za neispravan JSON ili za poruku bez obaveznih polja (<see cref="NotificationMessageValidator"/>)
 /// ide u dead-letter queue - nema beskonačnog requeue-a i nema slanja praznog emaila.
-/// Poruke za primaoce na zaštićenim domenama (<see cref="SmtpOptions.SuppressedRecipientDomains"/>) se
-/// ne šalju kad host nije Mailpit - vidi <see cref="RecipientSuppression"/>. Poruke koje su već jednom
+/// Poruke za primaoce na zaštićenim domenama (<see cref="SmtpOptions.SuppressedRecipientDomains"/>) ili sa hostom koji
+/// nije ispravno DNS ime se ne šalju kad host nije Mailpit - vidi <see cref="RecipientSuppression"/>. Poruke koje su već jednom
 /// uspješno poslane (redelivery nakon pada procesa) se prepoznaju preko <see cref="SentMessageIdStore"/> i
 /// samo ack-uju, bez ponovnog slanja; redelivery DOK je prvi pokušaj još u toku pokriva <see cref="InFlightSendGate"/>.
 /// </summary>
@@ -169,11 +169,19 @@ public sealed class Worker(
         }
 
         var smtp = smtpOptions.Value;
-        if (RecipientSuppression.ShouldSuppress(smtp.Host, message.RecipientEmail, smtp.SuppressedRecipientDomains))
+        var suppression = RecipientSuppression.Evaluate(smtp.Host, message.RecipientEmail, smtp.SuppressedRecipientDomains);
+        if (suppression != SuppressionReason.None)
         {
-            logger.LogInformation(
-                "Email {MessageId} ({EventType}) suppressed: recipient domain '{Domain}' is on Smtp:SuppressedRecipientDomains (host {Host} is not Mailpit).",
-                message.MessageId, message.EventType, RecipientSuppression.ExtractDomain(message.RecipientEmail), smtp.Host);
+            var domains = string.Join(", ", RecipientSuppression.ExtractDomains(message.RecipientEmail));
+            if (suppression == SuppressionReason.ProtectedDomain)
+                logger.LogInformation(
+                    "Email {MessageId} ({EventType}) suppressed: recipient domain '{Domain}' is on Smtp:SuppressedRecipientDomains (host {Host} is not Mailpit).",
+                    message.MessageId, message.EventType, domains, smtp.Host);
+            else
+                logger.LogWarning(
+                    "Email {MessageId} ({EventType}) suppressed: recipient host '{Domain}' is not a valid DNS host name " +
+                    "(only ASCII letters, digits, '-' and '.'), so it is never sent through {Host}.",
+                    message.MessageId, message.EventType, domains, smtp.Host);
             await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
             return;
         }

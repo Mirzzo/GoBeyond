@@ -17,7 +17,8 @@ public sealed class SmtpOptions
     /// Domene primaoca (npr. "gobeyond.ba") kojima se email NE šalje kroz stvarni SMTP kada host nije Mailpit
     /// (vidi <see cref="Services.RecipientSuppression"/>). Štiti realni SMTP nalog i treće strane od demo/seed
     /// adresa koje nisu prave poštanske adrese pod našom kontrolom. Pokriva i poddomene (npr. "edu.gobeyond.ba"
-    /// za konfigurisano "gobeyond.ba").
+    /// za konfigurisano "gobeyond.ba"). Primalac čiji host nije ispravno DNS ime se kroz stvarni SMTP ne šalje ni
+    /// kad je ova lista prazna.
     /// </summary>
     public string[] SuppressedRecipientDomains { get; set; } = [];
 

@@ -86,6 +86,66 @@ public class RecipientSuppressionTests
         Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
     }
 
+    // IdnMapping maps look-alikes of '@' (U+FF20, U+FE6B) and '>' (U+FF1E, U+FE65) to ASCII, so SmtpClient would send
+    // e.g. RCPT TO:<x@edu@gobeyond.ba> or <x@gobeyond.ba>>, which a lenient server delivers to the protected domain. A
+    // comma-separated list is split into several recipients by MailMessage.To.Add.
+    [Theory]
+    [InlineData("x@gobeyond.ba\uFE65")]
+    [InlineData("x@gobeyond.ba.\uFE65")]
+    [InlineData("x@edu.gobeyond.ba\uFE65")]
+    [InlineData("<x@gobeyond.ba\uFE65>")]
+    [InlineData("x@\uFE6Bgobeyond.ba")]
+    [InlineData("x@edu\uFE6Bgobeyond.ba")]
+    [InlineData("x@gobeyond.ba\uFF1E")]
+    [InlineData("x@gobeyond.ba.\uFF1E")]
+    [InlineData("x@edu.gobeyond.ba\uFF1E")]
+    [InlineData("<x@gobeyond.ba\uFF1E>")]
+    [InlineData("x@\uFF20gobeyond.ba")]
+    [InlineData("x@edu\uFF20gobeyond.ba")]
+    [InlineData("x@gobeyond.ba,a@example.org")]
+    [InlineData("x@gobeyond.ba, a@example.org")]
+    public void Evaluate_SuppressesAProtectedDomainInsideAHostThatIsNotAValidDnsName(string recipient)
+    {
+        Assert.Equal(SuppressionReason.ProtectedDomain, RecipientSuppression.Evaluate("smtp.gmail.com", recipient, SuppressedDomains));
+        Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
+    }
+
+    // Not a protected domain, but still not a DNS host name after IDN mapping: never sent through a real SMTP host,
+    // also when no domains are configured.
+    [Theory]
+    [InlineData("x@go\uFF20beyond.ba")] // go@beyond.ba
+    [InlineData("x@example\uFE65.org")] // example>.org
+    [InlineData("x@example.org\u00A0")] // no-break space becomes a trailing ASCII space
+    [InlineData("x@exa\u3000mple.org")] // ideographic space becomes an ASCII space
+    public void Evaluate_SuppressesAHostThatIsNotAValidDnsName_EvenWithoutConfiguredDomains(string recipient)
+    {
+        Assert.Equal(SuppressionReason.InvalidHostName, RecipientSuppression.Evaluate("smtp.gmail.com", recipient, SuppressedDomains));
+        Assert.Equal(SuppressionReason.InvalidHostName, RecipientSuppression.Evaluate("smtp.gmail.com", recipient, []));
+        Assert.Equal(SuppressionReason.None, RecipientSuppression.Evaluate("mailpit", recipient, SuppressedDomains));
+    }
+
+    [Theory]
+    [InlineData("x@example.org")]
+    [InlineData("x@\uFF45xample.org")] // fullwidth 'e' maps to the valid host example.org
+    [InlineData("x@m\u00FCnchen.de")] // sent as xn--mnchen-3ya.de
+    [InlineData("Ime Prezime <x@sub-domena.example.org>")]
+    public void Evaluate_SendsToAValidHostThatIsNotProtected(string recipient)
+    {
+        Assert.Equal(SuppressionReason.None, RecipientSuppression.Evaluate("smtp.gmail.com", recipient, SuppressedDomains));
+    }
+
+    [Fact]
+    public void ExtractDomains_ReturnsTheHostOfEveryRecipientInAList()
+    {
+        Assert.Equal(["gobeyond.ba", "example.org"], RecipientSuppression.ExtractDomains("x@gobeyond.ba, a@example.org"));
+    }
+
+    [Fact]
+    public void ExtractDomain_KeepsTheAsciiFormOfALookAlikeAtSign()
+    {
+        Assert.Equal("edu@gobeyond.ba", RecipientSuppression.ExtractDomain("x@edu\uFF20gobeyond.ba"));
+    }
+
     [Fact]
     public void ExtractDomain_ConvertsFullwidthLetterToAscii()
     {

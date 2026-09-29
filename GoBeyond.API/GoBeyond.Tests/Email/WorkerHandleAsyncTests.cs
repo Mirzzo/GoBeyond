@@ -5,6 +5,7 @@ using GoBeyond.Contracts.Messages;
 using GoBeyond.EmailConsumer;
 using GoBeyond.EmailConsumer.Options;
 using GoBeyond.EmailConsumer.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
@@ -118,6 +119,40 @@ public class WorkerHandleAsyncTests
             .WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.True(store.WasSent(EmailIdempotencyKey.For(Message)));
+    }
+
+    // Look-alikes of '@' and '>' become ASCII after IDN mapping, so SmtpClient would send RCPT TO:<x@edu@gobeyond.ba>
+    // or <x@example>.org>: through a real SMTP host such a recipient is only logged and acked.
+    [Theory]
+    [InlineData("x@edu＠gobeyond.ba", "gobeyond.ba", LogLevel.Information,
+        "suppressed: recipient domain 'edu@gobeyond.ba' is on Smtp:SuppressedRecipientDomains (host smtp.example.com is not Mailpit).")]
+    [InlineData("x@example﹥.org", "", LogLevel.Warning,
+        "suppressed: recipient host 'example>.org' is not a valid DNS host name (only ASCII letters, digits, '-' and '.'), " +
+        "so it is never sent through smtp.example.com.")]
+    public async Task HandleAsync_RecipientHostThatIsNotAValidDnsName_IsAckedWithoutSending(
+        string recipient, string suppressedDomain, LogLevel level, string logEnding)
+    {
+        var sender = new BlockingEmailSender();
+        sender.Release();
+        var logger = new RecordingLogger<Worker>();
+        var smtp = new SmtpOptions
+        {
+            Host = "smtp.example.com",
+            SuppressedRecipientDomains = suppressedDomain.Length == 0 ? [] : [suppressedDomain]
+        };
+        var worker = new Worker(logger, Options.Create(Settings), Options.Create(smtp), sender,
+            new SentMessageIdStore(path: null), new InFlightSendGate());
+        var channel = new NoOpChannel();
+        var delivery = new BasicDeliverEventArgs("consumer-tag", 1, false, string.Empty, Settings.Queue, new BasicProperties(),
+            JsonSerializer.SerializeToUtf8Bytes(Message with { RecipientEmail = recipient }), CancellationToken.None);
+
+        await worker.HandleAsync(channel, delivery, Settings, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(0, sender.CallCount);
+        Assert.Equal([1UL], channel.Acked);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(level, entry.Level);
+        Assert.Equal("Email 1 (ClientRegistered) " + logEnding, entry.Message);
     }
 
     private static Task RunWithContext(SynchronizationContext? context, Func<Task> start)
