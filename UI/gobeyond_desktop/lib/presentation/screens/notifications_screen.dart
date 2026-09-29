@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -22,37 +24,62 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   final _searchController = TextEditingController();
   bool _loading = true;
   bool _unreadOnly = false;
+  // The last search text the user actually submitted (Enter), not whatever
+  // is currently typed — the background poll must not apply a half-typed
+  // query the user never asked for.
+  String _submittedSearch = '';
   List<Map<String, dynamic>> _items = const [];
+  Timer? _refreshTimer;
+  // Bumped on every _load() call so a response from a superseded request
+  // (e.g. the 30s poll landing after a filter change) is ignored instead of
+  // overwriting newer data on screen.
+  int _requestId = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // The screen is pushed with its own AppBar, so the top-bar bell badge
+    // (which only polls every 30s while that shell is visible) is hidden
+    // while this is open — poll here too so a notification that arrives
+    // while the user is looking at this screen still shows up.
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _load(silent: true));
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  /// [silent] is used by the background timer: it keeps the current list on
+  /// screen (no full-screen spinner) and does not surface a transient
+  /// network error as a snackbar every 30s.
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
+    final requestId = ++_requestId;
     try {
       final items = await _service.getNotifications(
         unreadOnly: _unreadOnly ? true : null,
-        search: _searchController.text,
+        search: _submittedSearch,
       );
-      if (!mounted) return;
+      if (!mounted || requestId != _requestId) return;
       setState(() {
         _items = items;
         _loading = false;
       });
+      await context.read<SessionController>().refreshUnreadCount();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || requestId != _requestId) return;
       setState(() => _loading = false);
-      showErrorSnack(context, ApiError.from(error).message);
+      if (!silent) showErrorSnack(context, ApiError.from(error).message);
     }
+  }
+
+  void _submitSearch() {
+    _submittedSearch = _searchController.text;
+    _load();
   }
 
   Future<void> _markRead(Map<String, dynamic> item) async {
@@ -88,6 +115,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         title: const Text('Obavijesti'),
         backgroundColor: AppColors.panel,
         actions: [
+          IconButton(tooltip: 'Osvježi', icon: const Icon(Icons.refresh), onPressed: () => _load()),
           TextButton(onPressed: _markAllRead, child: const Text('Označi sve kao pročitano')),
           const SizedBox(width: 8),
         ],
@@ -102,7 +130,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 child: SearchField(
                   controller: _searchController,
                   hintText: 'Pretraga po naslovu ili sadržaju',
-                  onSubmitted: (_) => _load(),
+                  onSubmitted: (_) => _submitSearch(),
                 ),
               ),
               const SizedBox(width: 12),
