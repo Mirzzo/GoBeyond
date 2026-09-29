@@ -32,7 +32,7 @@ const _questions = [
   _QuestionSpec(
       'Koliko puta sedmično realno možete trenirati?', 'weeklySessions'),
   _QuestionSpec(
-    'Koliko često se baviš fizičkom aktivnošću van treninga (šetnje, sportovi, rekreacija)?',
+    'Koliko često se bavite fizičkom aktivnošću van treninga (šetnje, sportovi, rekreacija)?',
     'outsideActivity',
   ),
 ];
@@ -136,6 +136,7 @@ class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
                   min: 2,
                   max: 500,
                   label: 'Odgovor',
+                  gender: LabelGender.masculine,
                 ),
               ),
               const SizedBox(height: 10),

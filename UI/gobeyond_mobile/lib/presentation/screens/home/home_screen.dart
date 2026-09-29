@@ -6,6 +6,7 @@ import '../../../data/models/lookup_item.dart';
 import '../../../data/models/recommendation.dart';
 import '../../../data/repositories/lookup_repository.dart';
 import '../../../data/repositories/mentor_repository.dart';
+import '../../widgets/app_network_image.dart';
 import '../../widgets/app_panel.dart';
 import '../../widgets/gb_scaffold.dart';
 import '../../widgets/gobeyond_logo.dart';
@@ -205,15 +206,12 @@ class _RecommendationCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 28,
-            backgroundColor: AppTheme.panelLight,
-            child: Text(
-              mentor.fullName.isNotEmpty
-                  ? mentor.fullName[0].toUpperCase()
-                  : '?',
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
-            ),
+          AppNetworkImage(
+            url: mentor.profileImageUrl,
+            width: 56,
+            height: 56,
+            borderRadius: 28,
+            yellowBorder: true,
           ),
           const SizedBox(width: 14),
           Expanded(

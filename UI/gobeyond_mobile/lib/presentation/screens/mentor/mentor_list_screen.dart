@@ -127,7 +127,7 @@ class _MentorListScreenState extends State<MentorListScreen> {
             const SizedBox(height: 14),
             Row(
               children: [
-                const Text('SORT BY:',
+                const Text('SORTIRAJ PO:',
                     style:
                         TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
                 const SizedBox(width: 10),
