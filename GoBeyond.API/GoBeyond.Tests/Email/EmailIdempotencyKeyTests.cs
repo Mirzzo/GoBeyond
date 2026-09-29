@@ -15,7 +15,7 @@ public class EmailIdempotencyKeyTests
     {
         // This is the true redelivery case: RabbitMQ republishes the exact same bytes after the consumer
         // crashed between the successful SMTP send and the ack. Same MessageId, same CreatedAt, same content
-        // -> same key -> recognized as already sent (BG-06).
+        // -> same key -> recognized as already sent.
         Assert.Equal(EmailIdempotencyKey.For(Message()), EmailIdempotencyKey.For(Message()));
     }
 
@@ -36,8 +36,8 @@ public class EmailIdempotencyKeyTests
     {
         // MessageId 7301 reused with a different recipient/subject/body/event type must NOT be treated as the
         // same message, even if CreatedAtTicks happened to collide too.
-        var first = Message(recipient: "rev.e1.first@example.org", subject: "dup A", body: "body A");
-        var different = Message(eventType: "MentorApproved", recipient: "rev.e1.other.user@example.org",
+        var first = Message(recipient: "prvi@example.org", subject: "dup A", body: "body A");
+        var different = Message(eventType: "MentorApproved", recipient: "drugi@example.org",
             subject: "different email same id (after DB reset)", body: "different");
 
         Assert.NotEqual(EmailIdempotencyKey.For(first), EmailIdempotencyKey.For(different));

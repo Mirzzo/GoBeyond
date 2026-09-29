@@ -28,9 +28,8 @@ public class SentMessageIdStoreTests : IDisposable
         Assert.True(store.WasSent("109:100:abc"));
     }
 
-    // BG-06: the consumer sent to SMTP, then was killed before BasicAck. The broker redelivered the message
-    // and it was sent a second time because nothing remembered that this key had already gone out. A
-    // restarted consumer must construct a *new* SentMessageIdStore instance (same file) and still recognize it.
+    // The consumer sent to SMTP and was killed before BasicAck; the broker redelivers the message to a restarted
+    // consumer, which builds a *new* store instance over the same file and must still recognize the key.
     [Fact]
     public void WasSent_SurvivesAcrossNewStoreInstance_SimulatingConsumerRestartAfterCrash()
     {
@@ -51,12 +50,12 @@ public class SentMessageIdStoreTests : IDisposable
     public void WasSent_DoesNotTreatAReusedMessageIdWithDifferentContentAsAlreadySent_AfterSimulatedDbReset()
     {
         var store = new SentMessageIdStore(_path);
-        var before = new EmailNotificationMessage(109, "ClientRegistered", "rev.e1.first@example.org", "dup A", "body A", CreatedAtTicks: 100);
+        var before = new EmailNotificationMessage(109, "ClientRegistered", "prvi@example.org", "dup A", "body A", CreatedAtTicks: 100);
         store.MarkSent(EmailIdempotencyKey.For(before));
 
         // Database was reset; OutboxMessages restarted from 1, so a brand new, unrelated email reused Id 109 -
         // but its CreatedAt (and content) are different.
-        var after = new EmailNotificationMessage(109, "MentorApproved", "rev.e1.other.user@example.org", "different email same id", "different body", CreatedAtTicks: 999);
+        var after = new EmailNotificationMessage(109, "MentorApproved", "drugi@example.org", "different email same id", "different body", CreatedAtTicks: 999);
 
         Assert.False(store.WasSent(EmailIdempotencyKey.For(after)));
     }

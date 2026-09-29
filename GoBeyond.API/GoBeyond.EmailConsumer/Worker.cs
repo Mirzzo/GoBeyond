@@ -56,7 +56,7 @@ public sealed class Worker(
                 await channel.BasicQosAsync(0, 1, false, stoppingToken);
 
                 // Broker koji obriše queue (ili na drugi način otkaže ovog consumer-a) šalje basic.cancel: konekcija
-                // i kanal ostaju IsOpen (nema greške), samo consumer prestaje da prima isporuke (BG-02d). To se
+                // i kanal ostaju IsOpen (nema greške), samo consumer prestaje da prima isporuke. To se
                 // prati preko UnregisteredAsync/ShutdownAsync (ne pollingom IsRunning - odmah nakon BasicConsumeAsync
                 // bi to moglo kratko biti false dok potvrda registracije ne stigne, pa bi polling lažno okinuo
                 // reconnect u petlji); kad se okine bilo koji od njih, unutrašnja petlja ispod se prekida, `await
@@ -70,9 +70,8 @@ public sealed class Worker(
 
                 while (ShouldKeepConsuming(connection.IsOpen, channel.IsOpen, cancelled.Task.IsCompleted, stoppingToken))
                 {
-                    // Fajl se piše SAMO dok je consumer stvarno registrovan (petlja gore) - u BG-02d je prije ovog
-                    // fajl ostajao svjež i kad je broker otkazao consumer-a, pa je docker healthcheck lažno
-                    // prijavljivao "healthy" dok je pošta stajala neisporučena.
+                    // Fajl se piše SAMO dok je consumer stvarno registrovan, da docker healthcheck ne prijavi
+                    // "healthy" dok je broker otkazao consumer-a i pošta stoji neisporučena.
                     await File.WriteAllTextAsync(HealthFile, DateTime.UtcNow.ToString("O"), stoppingToken);
                     await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(15), stoppingToken), cancelled.Task);
                 }
@@ -100,7 +99,7 @@ public sealed class Worker(
     /// True dok treba nastaviti konzumirati sa trenutnom konekcijom/kanalom: oboje moraju biti otvoreni, consumer
     /// ne smije biti otkazan od strane brokera (<paramref name="consumerCancelled"/>, vidi komentar u
     /// <see cref="ExecuteAsync"/>) i servis ne smije biti u gašenju. Izdvojeno kao čista funkcija radi testiranja
-    /// bez pravog RabbitMQ kanala (prije BG-02d fix-a ovaj uslov nije uzimao u obzir otkazivanje consumer-a).
+    /// bez pravog RabbitMQ kanala.
     /// </summary>
     public static bool ShouldKeepConsuming(bool connectionOpen, bool channelOpen, bool consumerCancelled, CancellationToken stoppingToken) =>
         connectionOpen && channelOpen && !consumerCancelled && !stoppingToken.IsCancellationRequested;
@@ -108,7 +107,7 @@ public sealed class Worker(
     /// <summary>
     /// Kači se na <paramref name="consumer"/>-ove UnregisteredAsync/ShutdownAsync evente i signalizira
     /// <paramref name="cancelled"/> prvi put kad se bilo koji od njih okine, tako da unutrašnja petlja u
-    /// <see cref="ExecuteAsync"/> stane i vanjska petlja se ponovo poveže (BG-02d). Izdvojeno iz
+    /// <see cref="ExecuteAsync"/> stane i vanjska petlja se ponovo poveže. Izdvojeno iz
     /// <see cref="ExecuteAsync"/> u zaseban metod da bi samo kačenje bilo pokriveno testom bez prave RabbitMQ
     /// konekcije - vidi WorkerConsumerLoopTests, koji ovaj metod poziva nad pravim
     /// <see cref="AsyncEventingBasicConsumer"/>-om i onda direktno zove
@@ -180,7 +179,7 @@ public sealed class Worker(
         if (sentMessageIds.WasSent(idempotencyKey))
         {
             // Redelivery nakon pada procesa između uspješnog SMTP slanja i BasicAck-a (vidi SentMessageIdStore) -
-            // email je stvarno već poslan, samo se potvrđuje bez ponovnog slanja (BG-06).
+            // email je stvarno već poslan, samo se potvrđuje bez ponovnog slanja.
             logger.LogInformation("Email {MessageId} ({EventType}) already sent earlier (redelivered by the broker); acking without resending.",
                 message.MessageId, message.EventType);
             await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);

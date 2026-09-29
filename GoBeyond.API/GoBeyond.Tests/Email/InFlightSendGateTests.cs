@@ -4,10 +4,9 @@ namespace GoBeyond.Tests.Email;
 
 public class InFlightSendGateTests
 {
-    // BG-06's remaining gap: the broker redelivers the SAME message while the first SMTP send is still in
-    // flight (e.g. a connection blip triggers RabbitMQ.Client's automatic recovery mid-send). The fake attempt
-    // below blocks on a controllable gate, just like a slow SMTP call, so the test deterministically proves the
-    // second call waits instead of sending a second time.
+    // The broker redelivers the SAME message while the first SMTP send is still in flight (e.g. RabbitMQ.Client's
+    // automatic recovery after a connection blip). The fake attempt blocks like a slow SMTP call, so the test
+    // deterministically proves the second call waits instead of sending a second time.
     [Fact]
     public async Task RunAsync_SecondCallForSameKey_WaitsForTheFirst_AndDoesNotRunItsOwnAttempt()
     {

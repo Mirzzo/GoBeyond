@@ -8,7 +8,7 @@ namespace GoBeyond.EmailConsumer.Services;
 /// <summary>
 /// Durable idempotency "brana" protiv duplog slanja emaila nakon pada procesa između uspješnog SMTP slanja i
 /// BasicAck-a: RabbitMQ isporučuje poruku ponovo (at-least-once), pa bi se bez ovoga isti email poslao dvaput
-/// nakon restarta (BG-06). Za redelivery DOK je proces živ i prvi pokušaj još u toku vidi
+/// nakon restarta. Za redelivery DOK je proces živ i prvi pokušaj još u toku vidi
 /// <see cref="InFlightSendGate"/> - ovaj store to ne pokriva jer se upisuje tek nakon uspješnog slanja.
 ///
 /// Pamti ključeve (<see cref="EmailIdempotencyKey"/>) uspješno poslanih poruka u append-only tekstualnom fajlu

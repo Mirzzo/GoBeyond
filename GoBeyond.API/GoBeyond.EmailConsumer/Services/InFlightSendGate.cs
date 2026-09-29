@@ -4,9 +4,9 @@ namespace GoBeyond.EmailConsumer.Services;
 
 /// <summary>
 /// Sprječava dupli SMTP send kad broker redelivera istu poruku dok je prvi pokušaj još u toku (npr. konekcija
-/// pukne i RabbitMQ.Client je automatski oporavi dok je prvi handler i dalje blokiran na sporom SMTP odgovoru -
-/// BG-06). <see cref="SentMessageIdStore"/> ovo ne pokriva jer se upisuje tek NAKON uspješnog slanja. Poziv za
-/// ključ koji je već u toku čeka ishod tog poziva umjesto da šalje ponovo, i pokuša sam samo ako je prvi propao.
+/// pukne i RabbitMQ.Client je automatski oporavi dok je prvi handler i dalje blokiran na sporom SMTP odgovoru).
+/// <see cref="SentMessageIdStore"/> ovo ne pokriva jer se upisuje tek NAKON uspješnog slanja. Poziv za ključ koji
+/// je već u toku čeka ishod tog poziva umjesto da šalje ponovo, i pokuša sam samo ako je prvi propao.
 /// </summary>
 public sealed class InFlightSendGate
 {

@@ -6,7 +6,7 @@ namespace GoBeyond.Tests.Email;
 public class NotificationMessageValidatorTests
 {
     private static EmailNotificationMessage Valid() =>
-        new(MessageId: 9007, EventType: "ClientRegistered", RecipientEmail: "qa.bg04.7@gobeyond.ba",
+        new(MessageId: 9007, EventType: "ClientRegistered", RecipientEmail: "klijent@gobeyond.ba",
             Subject: "Dobrodošli na GoBeyond", Body: "Hvala na registraciji.");
 
     [Fact]
@@ -21,8 +21,8 @@ public class NotificationMessageValidatorTests
         Assert.False(NotificationMessageValidator.IsValid(null));
     }
 
-    // BG-04: a queue payload with only MessageId + RecipientEmail (no Subject/Body/EventType - e.g. published
-    // by hand, bypassing the API outbox) used to be sent as a blank email instead of going to the DLQ.
+    // A queue payload with only MessageId + RecipientEmail (no Subject/Body/EventType - e.g. published by hand,
+    // bypassing the API outbox) must go to the DLQ instead of being sent as a blank email.
     [Theory]
     [InlineData("", "Hvala na registraciji.", "ClientRegistered")]
     [InlineData("   ", "Hvala na registraciji.", "ClientRegistered")]
@@ -34,7 +34,7 @@ public class NotificationMessageValidatorTests
     [InlineData("Dobrodošli na GoBeyond", "Hvala na registraciji.", null)]
     public void IsValid_ReturnsFalse_WhenSubjectBodyOrEventTypeMissing(string? subject, string? body, string? eventType)
     {
-        var message = new EmailNotificationMessage(9007, eventType!, "qa.bg04.7@gobeyond.ba", subject!, body!);
+        var message = new EmailNotificationMessage(9007, eventType!, "klijent@gobeyond.ba", subject!, body!);
         Assert.False(NotificationMessageValidator.IsValid(message));
     }
 

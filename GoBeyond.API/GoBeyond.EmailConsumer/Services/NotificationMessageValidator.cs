@@ -7,7 +7,7 @@ namespace GoBeyond.EmailConsumer.Services;
 /// Provjerava da li je <see cref="EmailNotificationMessage"/> sa queue-a potpun. <see cref="EmailNotificationMessage"/>
 /// deklariše sva polja kao ne-null stringove, ali System.Text.Json to ne provjerava pri deserijalizaciji -
 /// poruka bez <c>Subject</c>/<c>Body</c> (npr. ručno objavljena na queue mimo API outbox-a) bi se inače poslala
-/// kao prazan email. Takva poruka se tretira isto kao nedostajući primalac: ide u dead-letter queue (BG-04).
+/// kao prazan email. Takva poruka se tretira isto kao nedostajući primalac: ide u dead-letter queue.
 /// </summary>
 public static class NotificationMessageValidator
 {

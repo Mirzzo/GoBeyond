@@ -40,9 +40,7 @@ public class RecipientSuppressionTests
     [InlineData("x@a.b.gobeyond.ba")]
     public void ShouldSuppress_SuppressesSubdomainsOfConfiguredDomain_WhenHostIsRealSmtp(string recipient)
     {
-        // NOT-08 / AUTH-03: qa.sec.2@edu.gobeyond.ba was really sent through Gmail because ShouldSuppress only
-        // matched the domain exactly. edu.gobeyond.ba is a subdomain of the suppressed gobeyond.ba and belongs
-        // to the same third party, so it must be suppressed too.
+        // A subdomain belongs to the same third party as the configured domain.
         Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
     }
 
@@ -54,11 +52,7 @@ public class RecipientSuppressionTests
         Assert.False(RecipientSuppression.ShouldSuppress("smtp.gmail.com", "x@notgobeyond.ba", SuppressedDomains));
     }
 
-    // ExtractDomain used to split the raw string on '@', while SmtpEmailSender actually sends through
-    // System.Net.Mail.MailAddress, which normalizes these forms. A trailing dot, angle brackets or a comment
-    // all slipped past suppression (even for the exact base domain) although the mail really went out to the
-    // clean, protected address. ExtractDomain now parses through MailAddress (the same parser the sender uses)
-    // so suppression sees the SAME host the email would really be sent to.
+    // MailAddress (used by SmtpEmailSender) normalizes these forms to the plain protected address.
     [Theory]
     [InlineData("x@gobeyond.ba.")] // trailing dot on the exact base domain
     [InlineData("x@edu.gobeyond.ba.")] // trailing dot on a subdomain
@@ -70,10 +64,7 @@ public class RecipientSuppressionTests
         Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
     }
 
-    // SmtpClient converts a non-ASCII host to its ASCII/Punycode form (IdnMapping.GetAscii, UTS46) before
-    // putting it on the wire - fullwidth Latin letters are mapped to plain ASCII, the ideographic/fullwidth
-    // full stop become '.', and zero-width/soft-hyphen characters are dropped. ExtractDomain must apply the
-    // same conversion, or these variants of a protected domain reach the real SMTP server unsuppressed.
+    // SmtpClient sends a non-ASCII host in its IdnMapping.GetAscii form, where these become the protected domain.
     [Theory]
     [InlineData("x@ｇobeyond.ba")] // fullwidth 'g' (U+FF47) folds to ASCII 'g'
     [InlineData("x@gobeyond.ba​")] // trailing zero-width space (U+200B) is dropped
