@@ -409,7 +409,7 @@ class _UserEditDialogState extends State<_UserEditDialog> {
           child: TextFormField(
             controller: _price,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Mjesečna cijena (1-1000 KM)'),
+            decoration: const InputDecoration(labelText: 'Mjesečna cijena (1-1000 \$)'),
             validator: _serverErrors.wrap('monthlyPrice', (v) => Validators.numberRange(v, 1, 1000, label: 'Cijena', maxDecimals: 2)),
           ),
         ),

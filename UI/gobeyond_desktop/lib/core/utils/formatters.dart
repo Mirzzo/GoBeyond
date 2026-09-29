@@ -39,9 +39,17 @@ class Formatters {
     return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:00';
   }
 
-  static String money(num? value, {String currency = 'BAM'}) {
+  /// Formats like the mobile app (Formatters.price): the backend's only
+  /// currency ('usd') prints as "$44.99"; any other code prints as
+  /// "44.99 CODE" instead of guessing a fallback currency that was never
+  /// actually charged.
+  static String money(num? value, {String currency = 'usd'}) {
     final amount = (value ?? 0).toDouble();
-    return '${amount.toStringAsFixed(2)} $currency';
+    final formatted = amount.toStringAsFixed(2);
+    if (currency.toUpperCase() == 'USD') {
+      return '\$$formatted';
+    }
+    return '$formatted $currency';
   }
 
   static String date(String? isoDate) {

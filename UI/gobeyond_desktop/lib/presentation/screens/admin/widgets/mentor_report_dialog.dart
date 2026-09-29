@@ -64,7 +64,7 @@ class _MentorReportDialogState extends State<_MentorReportDialog> {
   }
 
   List<MapEntry<String, String>> _fields(Map<String, dynamic> r) {
-    final currency = r['currency'] as String? ?? 'BAM';
+    final currency = r['currency'] as String? ?? 'usd';
     return [
       MapEntry('Mentor', r['fullName'] as String? ?? widget.fullName),
       MapEntry('Vrsta treninga', r['trainingTypeName'] as String? ?? '-'),
@@ -180,8 +180,8 @@ class _MentorReportDialogState extends State<_MentorReportDialog> {
           runSpacing: 12,
           children: [
             StatTile(label: 'Aktivni pretplatnici', value: '${r['activeSubscribers'] ?? 0}'),
-            StatTile(label: 'Mjesečna zarada', value: Formatters.money(r['monthlyEarnings'] as num?, currency: r['currency'] as String? ?? 'BAM')),
-            StatTile(label: 'Ukupna zarada', value: Formatters.money(r['totalEarnings'] as num?, currency: r['currency'] as String? ?? 'BAM')),
+            StatTile(label: 'Mjesečna zarada', value: Formatters.money(r['monthlyEarnings'] as num?, currency: r['currency'] as String? ?? 'usd')),
+            StatTile(label: 'Ukupna zarada', value: Formatters.money(r['totalEarnings'] as num?, currency: r['currency'] as String? ?? 'usd')),
             StatTile(label: 'Vrijeme na stranici', value: Formatters.minutesToHoursAndMinutes(r['timeOnPlatformMinutes'] as num?)),
           ],
         ),

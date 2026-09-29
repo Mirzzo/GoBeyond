@@ -63,7 +63,7 @@ class _ClientReportDialogState extends State<_ClientReportDialog> {
   }
 
   List<MapEntry<String, String>> _fields(Map<String, dynamic> r) {
-    final currency = r['currency'] as String? ?? 'BAM';
+    final currency = r['currency'] as String? ?? 'usd';
     return [
       MapEntry('Klijent', r['fullName'] as String? ?? widget.fullName),
       MapEntry('Aktivni mentor', r['activeMentorName'] as String? ?? '-'),
@@ -180,7 +180,7 @@ class _ClientReportDialogState extends State<_ClientReportDialog> {
           runSpacing: 12,
           children: [
             StatTile(label: 'Aktivne pretplate', value: '${r['activeSubscriptions'] ?? 0}'),
-            StatTile(label: 'Ukupno plaćeno', value: Formatters.money(r['totalPaid'] as num?, currency: r['currency'] as String? ?? 'BAM')),
+            StatTile(label: 'Ukupno plaćeno', value: Formatters.money(r['totalPaid'] as num?, currency: r['currency'] as String? ?? 'usd')),
             StatTile(label: 'Završeni treninzi', value: '${r['completedTrainings'] ?? 0}'),
             StatTile(label: 'Vrijeme na stranici', value: Formatters.minutesToHoursAndMinutes(r['timeOnPlatformMinutes'] as num?)),
           ],

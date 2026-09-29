@@ -112,7 +112,7 @@ class _PocetnaScreenState extends State<PocetnaScreen> {
       StatTile(label: 'Aktivne pretplate', value: '${overview['activeSubscriptions'] ?? 0}', icon: Icons.subscriptions_outlined),
       StatTile(
         label: 'Mjesečna zarada',
-        value: Formatters.money(overview['monthlyEarnings'] as num?, currency: overview['currency'] as String? ?? 'BAM'),
+        value: Formatters.money(overview['monthlyEarnings'] as num?, currency: overview['currency'] as String? ?? 'usd'),
         icon: Icons.payments_outlined,
       ),
     ];

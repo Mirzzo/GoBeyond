@@ -110,7 +110,7 @@ class _OverviewTabState extends State<_OverviewTab> with AutomaticKeepAliveClien
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return EmptyState(message: _error!);
     final overview = _overview!;
-    final currency = overview['currency'] as String? ?? 'BAM';
+    final currency = overview['currency'] as String? ?? 'usd';
     final earnings = (overview['earningsLast6Months'] as List<dynamic>? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     final topMentors = (overview['topMentors'] as List<dynamic>? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     double maxEarning = 1;
@@ -276,7 +276,7 @@ class _MentorReportTabState extends State<_MentorReportTab> with AutomaticKeepAl
     try {
       final items = (report['items'] as List<dynamic>? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
       final totals = report['totals'] as Map<String, dynamic>? ?? const {};
-      final currency = report['currency'] as String? ?? 'BAM';
+      final currency = report['currency'] as String? ?? 'usd';
       final bytes = await PdfReport.buildTableReport(
         title: 'Izvještaj o mentorima',
         subtitle: '${Formatters.monthName(_month)} $_year',
@@ -309,7 +309,7 @@ class _MentorReportTabState extends State<_MentorReportTab> with AutomaticKeepAl
     final report = _report;
     final items = report == null ? <Map<String, dynamic>>[] : (report['items'] as List<dynamic>? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     final totals = report?['totals'] as Map<String, dynamic>? ?? const {};
-    final currency = report?['currency'] as String? ?? 'BAM';
+    final currency = report?['currency'] as String? ?? 'usd';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -460,7 +460,7 @@ class _ClientReportTabState extends State<_ClientReportTab> with AutomaticKeepAl
     try {
       final items = (report['items'] as List<dynamic>? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
       final totals = report['totals'] as Map<String, dynamic>? ?? const {};
-      final currency = report['currency'] as String? ?? 'BAM';
+      final currency = report['currency'] as String? ?? 'usd';
       final bytes = await PdfReport.buildTableReport(
         title: 'Izvještaj o klijentima',
         subtitle: '${Formatters.monthName(_month)} $_year',
@@ -493,7 +493,7 @@ class _ClientReportTabState extends State<_ClientReportTab> with AutomaticKeepAl
     final report = _report;
     final items = report == null ? <Map<String, dynamic>>[] : (report['items'] as List<dynamic>? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     final totals = report?['totals'] as Map<String, dynamic>? ?? const {};
-    final currency = report?['currency'] as String? ?? 'BAM';
+    final currency = report?['currency'] as String? ?? 'usd';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

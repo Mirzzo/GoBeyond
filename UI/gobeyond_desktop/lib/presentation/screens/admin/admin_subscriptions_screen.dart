@@ -85,7 +85,7 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
           _row('Mentor', subscription['mentorFullName'] as String? ?? '-'),
           _row('Vrsta treninga', subscription['trainingTypeName'] as String? ?? '-'),
           _row('Status', SubscriptionStatusPresentation.label(subscription['status'] as String? ?? '')),
-          _row('Cijena', Formatters.money(subscription['price'] as num?, currency: subscription['currency'] as String? ?? 'BAM')),
+          _row('Cijena', Formatters.money(subscription['price'] as num?, currency: subscription['currency'] as String? ?? 'usd')),
           _row('Datum kreiranja', Formatters.date(subscription['createdAt'] as String?)),
           _row('Početak', Formatters.date(subscription['startDate'] as String?)),
           _row('Kraj', Formatters.date(subscription['endDate'] as String?)),
@@ -198,7 +198,7 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
                               DataCell(Text(subscription['mentorFullName'] as String? ?? '-')),
                               DataCell(Text(subscription['trainingTypeName'] as String? ?? '-')),
                               DataCell(StatusChip(label: SubscriptionStatusPresentation.label(status), color: SubscriptionStatusPresentation.color(status))),
-                              DataCell(Text(Formatters.money(subscription['price'] as num?, currency: subscription['currency'] as String? ?? 'BAM'))),
+                              DataCell(Text(Formatters.money(subscription['price'] as num?, currency: subscription['currency'] as String? ?? 'usd'))),
                               DataCell(Text('${Formatters.date(subscription['startDate'] as String?)} - ${Formatters.date(subscription['endDate'] as String?)}')),
                               DataCell(PillButton(label: 'DETALJI', dense: true, onPressed: () => _openDetail(subscription))),
                             ]);
