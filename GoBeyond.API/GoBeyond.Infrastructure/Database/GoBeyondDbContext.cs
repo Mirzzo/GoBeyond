@@ -189,6 +189,14 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.Property(x => x.StatusReason).HasMaxLength(500);
             entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.ClientProfileId);
+            // Klijent ima najviše jednu otvorenu (PendingPayment/AwaitingMentor/Active) pretplatu, i kod istovremenih zahtjeva.
+            entity.HasIndex(x => x.ClientProfileId, "UX_Subscriptions_ClientProfileId_Open").IsUnique()
+                .HasFilter($"[Status] IN ({(int)Core.Enums.SubscriptionStatus.PendingPayment}, {(int)Core.Enums.SubscriptionStatus.AwaitingMentor}, " +
+                           $"{(int)Core.Enums.SubscriptionStatus.Active})");
+            // Svaki UPDATE pretplate je uslovljen pročitanim statusom (WHERE Id = @id AND Status = @status): upis nad
+            // zastarjelim stanjem (npr. prihvatanje nakon istovremenog odbijanja) ne uspijeva, umjesto da tiho pregazi prelaz.
+            entity.Property(x => x.Status).IsConcurrencyToken();
             entity.HasOne(x => x.ClientProfile).WithMany(x => x.Subscriptions)
                 .HasForeignKey(x => x.ClientProfileId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.MentorProfile).WithMany(x => x.Subscriptions)

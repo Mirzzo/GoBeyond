@@ -23,6 +23,7 @@ using GoBeyond.Infrastructure.StateMachineServices.TrainingPlans;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace GoBeyond.Infrastructure.Extensions;
 
@@ -60,7 +61,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITrainingPlanStateFactory, TrainingPlanStateFactory>();
 
         // Poslovni servisi
-        services.AddHttpClient<IPaymentGateway, StripePaymentGateway>();
+        // Stripe: eksplicitan timeout, da zaglavljen Stripe ne blokira zahtjev ni lifecycle ciklus (podrazumijevano 100 s).
+        services.AddHttpClient<IPaymentGateway, StripePaymentGateway>((provider, client) =>
+            client.Timeout = TimeSpan.FromSeconds(Math.Max(1, provider.GetRequiredService<IOptions<PaymentOptions>>().Value.RequestTimeoutSeconds)));
         services.AddScoped<IFileStorageService, FileStorageService>();
         services.AddScoped<INotificationSender, NotificationSender>();
         services.AddScoped<INotificationService, NotificationService>();

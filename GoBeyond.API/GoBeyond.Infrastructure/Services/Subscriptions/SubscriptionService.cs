@@ -28,6 +28,7 @@ public sealed class SubscriptionService(
     IPaymentGateway paymentGateway) : ISubscriptionService
 {
     public const string AlreadyCollaborating = "Već imate aktivnu ili započetu saradnju sa mentorom.";
+    public const string CancelRefundFailed = "Otkazivanje nije moguće: povrat uplate klijentu nije uspio. Pokušajte ponovo.";
 
     public async Task<SubscriptionDetailDto> CreateAsync(int clientUserId, CreateSubscriptionRequest request, CancellationToken cancellationToken = default)
     {
@@ -36,37 +37,18 @@ public sealed class SubscriptionService(
                          .FirstOrDefaultAsync(x => x.Id == request.MentorProfileId, cancellationToken)
                      ?? throw new NotFoundException(DomainTexts.MentorNotFound);
 
-        var open = await db.Subscriptions.Include(x => x.Questionnaire)
-            .Where(x => x.ClientProfileId == client.Id && QueryExtensions.OpenStatuses.Contains(x.Status))
-            .ToListAsync(cancellationToken);
-
-        var questionnaire = request.Questionnaire!;
-        var pendingWithSameMentor = open.FirstOrDefault(x =>
-            x.Status == SubscriptionStatus.PendingPayment && x.MentorProfileId == mentor.Id);
-        if (pendingWithSameMentor is not null)
+        try
         {
-            // Klijent se vratio na plaćanje: vraća se postojeća pretplata sa ažuriranim upitnikom.
-            ApplyQuestionnaire(pendingWithSameMentor.Questionnaire ??= new Questionnaire(), questionnaire);
-            pendingWithSameMentor.Price = mentor.MonthlyPrice;
-            await db.SaveChangesAsync(cancellationToken);
-            return await GetMineByIdAsync(clientUserId, pendingWithSameMentor.Id, cancellationToken);
+            return await OpenOrResumeAsync(clientUserId, client.Id, mentor.Id, mentor.MonthlyPrice, request.Questionnaire!, cancellationToken);
         }
-        if (open.Count > 0) throw new ConflictException(AlreadyCollaborating);
-
-        var subscription = new Subscription
+        catch (DbUpdateException)
         {
-            ClientProfileId = client.Id,
-            MentorProfileId = mentor.Id,
-            Status = SubscriptionStatus.PendingPayment,
-            Price = mentor.MonthlyPrice,
-            Currency = paymentGateway.Currency,
-            CreatedAt = DateTime.UtcNow,
-            Questionnaire = new Questionnaire()
-        };
-        ApplyQuestionnaire(subscription.Questionnaire, questionnaire);
-        db.Subscriptions.Add(subscription);
-        await db.SaveChangesAsync(cancellationToken);
-        return await GetMineByIdAsync(clientUserId, subscription.Id, cancellationToken);
+            // Istovremeni zahtjev istog klijenta je u međuvremenu otvorio (ili platio) pretplatu: jedinstveni indeks dozvoljava
+            // najviše jednu PendingPayment/AwaitingMentor/Active pretplatu po klijentu. Odgovor je isti kao da je ovaj zahtjev
+            // stigao nakon njega (postojeća PendingPayment pretplata kod istog mentora ili 409).
+            db.ChangeTracker.Clear();
+            return await OpenOrResumeAsync(clientUserId, client.Id, mentor.Id, mentor.MonthlyPrice, request.Questionnaire!, cancellationToken);
+        }
     }
 
     public async Task<List<SubscriptionDto>> GetMineAsync(int clientUserId, SubscriptionStatus? status, CancellationToken cancellationToken = default)
@@ -99,15 +81,21 @@ public sealed class SubscriptionService(
     public async Task<SubscriptionDto> CancelAsync(int clientUserId, int id, CancellationToken cancellationToken = default)
     {
         var client = await GetClientAsync(clientUserId, cancellationToken);
-        var subscription = await WorkflowQuery().FirstOrDefaultAsync(x => x.Id == id && x.ClientProfileId == client.Id, cancellationToken)
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockSubscriptionAsync(id, cancellationToken);
+        var subscription = await WorkflowQuery().Include(x => x.Payments)
+                               .FirstOrDefaultAsync(x => x.Id == id && x.ClientProfileId == client.Id, cancellationToken)
                            ?? throw new NotFoundException(DomainTexts.SubscriptionNotFound);
 
         if (subscription.Status is not (SubscriptionStatus.PendingPayment or SubscriptionStatus.Active))
             throw new ValidationException("Pretplatu možete otkazati samo dok čeka plaćanje ili dok je aktivna.");
 
+        // Bez povrata (§7); nedovršena uplata se zatvara na Stripe-u (naplaćena se vraća, plativa se otkazuje).
         var wasActive = subscription.Status == SubscriptionStatus.Active;
-        workflow.Cancel(subscription, DomainTexts.ClientCancelledReason, DateTime.UtcNow, notifyClient: false, notifyMentor: wasActive);
+        await workflow.CancelAsync(subscription, DomainTexts.ClientCancelledReason, DateTime.UtcNow, notifyClient: false,
+            notifyMentor: wasActive, CancelRefundFailed, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         var reloaded = await ClientQuery().FirstAsync(x => x.Id == id, cancellationToken);
         return Fill(new SubscriptionDto(), reloaded);
@@ -126,10 +114,17 @@ public sealed class SubscriptionService(
 
     public async Task<AdminSubscriptionDto> AdminCancelAsync(int id, CancelSubscriptionRequest request, CancellationToken cancellationToken = default)
     {
-        var subscription = await WorkflowQuery().FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockSubscriptionAsync(id, cancellationToken);
+        var subscription = await WorkflowQuery().Include(x => x.Payments).FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
                            ?? throw new NotFoundException(DomainTexts.SubscriptionNotFound);
-        workflow.Cancel(subscription, request.Reason.Trim(), DateTime.UtcNow, notifyClient: true, notifyMentor: true);
+
+        // Plaćen zahtjev koji mentor nije prihvatio (AwaitingMentor) se vraća klijentu (neuspio povrat → 400 i ništa se ne
+        // mijenja); Active i PendingPayment ostaju bez povrata, kao kod otkazivanja klijenta.
+        await workflow.CancelAsync(subscription, request.Reason.Trim(), DateTime.UtcNow, notifyClient: true, notifyMentor: true,
+            CancelRefundFailed, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return await db.Subscriptions.AsNoTracking().Where(x => x.Id == id).Select(AdminProjection).FirstAsync(cancellationToken);
     }
 
@@ -158,6 +153,41 @@ public sealed class SubscriptionService(
         StatusReason = x.StatusReason
     };
 
+    private async Task<SubscriptionDetailDto> OpenOrResumeAsync(int clientUserId, int clientProfileId, int mentorProfileId, decimal price,
+        QuestionnaireRequest questionnaire, CancellationToken cancellationToken)
+    {
+        var open = await db.Subscriptions.Include(x => x.Questionnaire)
+            .Where(x => x.ClientProfileId == clientProfileId && QueryExtensions.OpenStatuses.Contains(x.Status))
+            .ToListAsync(cancellationToken);
+
+        var pendingWithSameMentor = open.FirstOrDefault(x =>
+            x.Status == SubscriptionStatus.PendingPayment && x.MentorProfileId == mentorProfileId);
+        if (pendingWithSameMentor is not null)
+        {
+            // Klijent se vratio na plaćanje: vraća se postojeća pretplata sa ažuriranim upitnikom.
+            ApplyQuestionnaire(pendingWithSameMentor.Questionnaire ??= new Questionnaire(), questionnaire);
+            pendingWithSameMentor.Price = price;
+            await db.SaveChangesAsync(cancellationToken);
+            return await GetMineByIdAsync(clientUserId, pendingWithSameMentor.Id, cancellationToken);
+        }
+        if (open.Count > 0) throw new ConflictException(AlreadyCollaborating);
+
+        var subscription = new Subscription
+        {
+            ClientProfileId = clientProfileId,
+            MentorProfileId = mentorProfileId,
+            Status = SubscriptionStatus.PendingPayment,
+            Price = price,
+            Currency = paymentGateway.Currency,
+            CreatedAt = DateTime.UtcNow,
+            Questionnaire = new Questionnaire()
+        };
+        ApplyQuestionnaire(subscription.Questionnaire, questionnaire);
+        db.Subscriptions.Add(subscription);
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetMineByIdAsync(clientUserId, subscription.Id, cancellationToken);
+    }
+
     private static void ApplyQuestionnaire(Questionnaire target, QuestionnaireRequest source)
     {
         target.PrimaryGoal = source.PrimaryGoal.Trim();
@@ -171,7 +201,8 @@ public sealed class SubscriptionService(
     private static T Fill<T>(T dto, Subscription x) where T : SubscriptionDto
     {
         var mentorUser = x.MentorProfile.User;
-        var mentorAvailable = !mentorUser.IsDeleted && mentorUser.IsActive && x.MentorProfile.Status == MentorApprovalStatus.Approved;
+        var mentorAvailable = !mentorUser.IsDeleted && mentorUser.IsActive && mentorUser.Role == UserRole.Mentor &&
+                              x.MentorProfile.Status == MentorApprovalStatus.Approved;
         dto.Id = x.Id;
         dto.MentorProfileId = x.MentorProfileId;
         dto.MentorFullName = mentorUser.FullName;

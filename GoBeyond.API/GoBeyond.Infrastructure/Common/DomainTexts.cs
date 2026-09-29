@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Globalization;
 using GoBeyond.Core.Enums;
 
 namespace GoBeyond.Infrastructure.Common;
@@ -43,5 +45,49 @@ public static class DomainTexts
         _ => role.ToString()
     };
 
-    public static string Date(DateTime? value) => value?.ToString("dd.MM.yyyy.") ?? "-";
+    /// <summary>Podrazumijevana vremenska zona platforme (korisnici su u BiH); mijenja se sa Lifecycle:TimeZoneId.</summary>
+    public const string DefaultTimeZoneId = "Europe/Sarajevo";
+
+    /// <summary>Windows naziv iste zone, ako sistem ne prepozna IANA naziv (npr. Windows bez ICU podataka).</summary>
+    private const string WindowsTimeZoneId = "Central European Standard Time";
+
+    private static readonly ConcurrentDictionary<string, TimeZoneInfo> TimeZones = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Datum u vremenskoj zoni platforme, npr. "29.11.2026.", isti kao u aplikacijama (one prikazuju lokalno vrijeme), a ne
+    /// UTC datum koji je oko ponoći dan ranije. Vrijednost bez Kind-a (iz baze) je UTC. Završna tačka je dio zapisa datuma,
+    /// pa rečenica koja se završava datumom ne dodaje još jednu.
+    /// </summary>
+    public static string Date(DateTime? value, string? timeZoneId = null)
+    {
+        if (value is not { } date) return "-";
+        var utc = date.Kind == DateTimeKind.Local ? date.ToUniversalTime() : DateTime.SpecifyKind(date, DateTimeKind.Utc);
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, PlatformTimeZone(timeZoneId)).ToString("dd.MM.yyyy.", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Slobodan tekst (npr. razlog koji je upisao mentor) kao rečenica: dodaje tačku ako ne završava sa ".", "!" ili "?".</summary>
+    public static string Sentence(string text)
+    {
+        var trimmed = text.Trim();
+        return trimmed.Length == 0 || trimmed[^1] is '.' or '!' or '?' ? trimmed : trimmed + ".";
+    }
+
+    public static TimeZoneInfo PlatformTimeZone(string? timeZoneId = null) =>
+        TimeZones.GetOrAdd(string.IsNullOrWhiteSpace(timeZoneId) ? DefaultTimeZoneId : timeZoneId.Trim(), FindTimeZone);
+
+    private static TimeZoneInfo FindTimeZone(string id)
+    {
+        foreach (var candidate in new[] { id, WindowsTimeZoneId })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(candidate);
+            }
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+            {
+                // probaj sljedeći naziv
+            }
+        }
+        return TimeZoneInfo.Utc;
+    }
 }

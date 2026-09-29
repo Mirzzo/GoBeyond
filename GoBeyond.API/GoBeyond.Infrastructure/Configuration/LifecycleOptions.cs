@@ -27,4 +27,13 @@ public sealed class LifecycleOptions
 
     /// <summary>Pending uplate starije od ovoliko sati se više ne provjeravaju (napušteni PaymentIntent-i se ne ispituju vječno).</summary>
     public int PaymentReconcileWindowHours { get; set; }
+
+    /// <summary>
+    /// Vremenska zona platforme za datume u tekstovima obavijesti i emailova (npr. "traje do 29.11.2026."), da odgovaraju
+    /// datumima u aplikacijama. IANA naziv; ako ga sistem ne prepozna, koristi se "Central European Standard Time".
+    /// </summary>
+    public string TimeZoneId { get; set; } = "Europe/Sarajevo";
+
+    /// <summary>Kašnjenje prvog ciklusa nakon pokretanja API-ja (migracija i seed baze se završe prije toga).</summary>
+    public int StartupDelaySeconds { get; set; } = 20;
 }

@@ -56,10 +56,14 @@ public sealed class CollaborationService(GoBeyondDbContext db, ISubscriptionWork
 
     public async Task<CollaborationRequestDto> AcceptAsync(int mentorUserId, int subscriptionId, CancellationToken cancellationToken = default)
     {
+        // Zaključana pretplata: istovremeno odbijanje (ili otkazivanje) čeka, odnosno prihvatanje vidi njegov rezultat (400).
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockSubscriptionAsync(subscriptionId, cancellationToken);
         var subscription = await WorkflowQuery(mentorUserId).FirstOrDefaultAsync(x => x.Id == subscriptionId, cancellationToken)
                            ?? throw new NotFoundException(DomainTexts.SubscriptionNotFound);
         workflow.Accept(subscription, DateTime.UtcNow);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return new CollaborationRequestDto
         {
@@ -75,11 +79,14 @@ public sealed class CollaborationService(GoBeyondDbContext db, ISubscriptionWork
 
     public async Task<MessageResponse> RejectAsync(int mentorUserId, int subscriptionId, string reason, CancellationToken cancellationToken = default)
     {
+        // Pretplata se zaključava prije čitanja: istovremeno prihvatanje (ili drugo odbijanje) čeka dok povrat i odbijanje
+        // ne završe, pa vidi Rejected (400) umjesto da ga pregazi. Neuspio povrat poništava transakciju (ostaje AwaitingMentor).
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockSubscriptionAsync(subscriptionId, cancellationToken);
         var subscription = await WorkflowQuery(mentorUserId).Include(x => x.Payments)
                                .FirstOrDefaultAsync(x => x.Id == subscriptionId, cancellationToken)
                            ?? throw new NotFoundException(DomainTexts.SubscriptionNotFound);
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await workflow.RejectAsync(subscription, reason.Trim(), DateTime.UtcNow, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -140,8 +147,12 @@ public sealed class CollaborationService(GoBeyondDbContext db, ISubscriptionWork
         return dto;
     }
 
+    /// <summary>
+    /// Pretplate koje mentor vidi: samo plaćene. Neplaćena pretplata (PaidAt == null) nikad nije stigla do mentora, pa se ne
+    /// prikazuje ni kasnije (npr. kao Cancelled), ni sa eksplicitnim ?status= filterom, ni po id-u.
+    /// </summary>
     private IQueryable<Subscription> MentorSubscriptions(int mentorUserId) =>
-        db.Subscriptions.AsNoTracking().Where(x => x.MentorProfile.UserId == mentorUserId);
+        db.Subscriptions.AsNoTracking().Where(x => x.MentorProfile.UserId == mentorUserId && x.PaidAt != null);
 
     private static IQueryable<Subscription> ApplyClientSearch(IQueryable<Subscription> query, string? search) =>
         search.NormalizeSearch() is { } term
@@ -156,7 +167,7 @@ public sealed class CollaborationService(GoBeyondDbContext db, ISubscriptionWork
         .Include(x => x.ClientProfile).ThenInclude(x => x.FitnessGoal);
 
     private IQueryable<Subscription> WorkflowQuery(int mentorUserId) => db.Subscriptions
-        .Where(x => x.MentorProfile.UserId == mentorUserId)
+        .Where(x => x.MentorProfile.UserId == mentorUserId && x.PaidAt != null)
         .Include(x => x.ClientProfile).ThenInclude(x => x.User)
         .Include(x => x.MentorProfile).ThenInclude(x => x.User)
         .Include(x => x.TrainingPlan);

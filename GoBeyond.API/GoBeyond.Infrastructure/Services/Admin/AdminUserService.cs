@@ -152,27 +152,33 @@ public sealed class AdminUserService(
         var now = DateTime.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
+        // Otvorene pretplate se zaključavaju (redom po Id-u) prije čitanja, pa istovremeni confirm ili prihvatanje ne može
+        // pregaziti otkazivanje.
+        var subscriptionIds = await db.Subscriptions
+            .Where(x => QueryExtensions.OpenStatuses.Contains(x.Status) &&
+                        (x.MentorProfile.UserId == id || x.ClientProfile.UserId == id))
+            .OrderBy(x => x.Id)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var subscriptionId in subscriptionIds)
+            await db.LockSubscriptionAsync(subscriptionId, cancellationToken);
+
         var subscriptions = await db.Subscriptions
             .Include(x => x.ClientProfile).ThenInclude(x => x.User)
             .Include(x => x.MentorProfile).ThenInclude(x => x.User)
             .Include(x => x.Payments)
-            .Where(x => QueryExtensions.OpenStatuses.Contains(x.Status) &&
-                        (x.MentorProfile.UserId == id || x.ClientProfile.UserId == id))
+            .Where(x => subscriptionIds.Contains(x.Id) && QueryExtensions.OpenStatuses.Contains(x.Status))
             .ToListAsync(cancellationToken);
 
         foreach (var subscription in subscriptions)
         {
             var mentorRemoved = subscription.MentorProfile.UserId == id;
-            if (subscription.Status == SubscriptionStatus.AwaitingMentor)
-            {
-                // Neuspio povrat prekida brisanje (transakcija se poništava); ponovni pokušaj koristi isti
-                // Stripe Idempotency-Key, pa se već izvršeni povrat ne ponavlja.
-                foreach (var payment in subscription.Payments.Where(x => x.Status is PaymentStatus.Succeeded or PaymentStatus.RefundPending))
-                    await workflow.RefundOrFailAsync(payment, now, DeleteRefundFailed, cancellationToken);
-            }
-            workflow.Cancel(subscription,
+            // Uplate neprihvaćenog zahtjeva (AwaitingMentor) se vraćaju i klijent to vidi u obavijesti. Neuspio povrat prekida
+            // brisanje (transakcija se poništava); ponovni pokušaj koristi isti Stripe Idempotency-Key, pa se već izvršeni
+            // povrat ne ponavlja. Mentor dobija obavijest samo o zahtjevu koji je vidio (ne o neplaćenoj PendingPayment).
+            await workflow.CancelAsync(subscription,
                 mentorRemoved ? DomainTexts.MentorRemovedReason : DomainTexts.ClientRemovedReason,
-                now, notifyClient: mentorRemoved, notifyMentor: !mentorRemoved);
+                now, notifyClient: mentorRemoved, notifyMentor: !mentorRemoved, DeleteRefundFailed, cancellationToken);
         }
 
         user.IsDeleted = true;

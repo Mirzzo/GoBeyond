@@ -362,7 +362,8 @@ public sealed class PaymentServiceTests : IDisposable
     {
         var workflow = CreateWorkflow(db);
         var subscriptions = new SubscriptionService(db, workflow, _gateway);
-        return new PaymentService(db, _gateway, workflow, subscriptions, NullLogger<PaymentService>.Instance);
+        return new PaymentService(db, _gateway, workflow, subscriptions,
+            Options.Create(new LifecycleOptions { PaymentReconcileWindowHours = 48 }), NullLogger<PaymentService>.Instance);
     }
 
     private SubscriptionWorkflow CreateWorkflow(GoBeyondDbContext db) =>

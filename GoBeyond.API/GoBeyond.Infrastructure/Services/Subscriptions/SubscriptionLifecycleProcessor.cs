@@ -35,29 +35,96 @@ public sealed class SubscriptionLifecycleProcessor(
         var settings = options.Value;
         // Usklađivanje uplata ide prvo: produženje plaćeno tik prije isteka (a nepotvrđeno) mora produžiti
         // pretplatu prije nego je ExpireAsync proglasi isteklom (inače bi uplata bila vraćena umjesto primijenjena).
+        // Uplate mlađe od praga usklađivanja ExpireAsync sam provjerava na Stripe-u prije isteka.
         var result = new LifecycleRunResult(
-            await payments.ReconcilePendingAsync(now.AddMinutes(-settings.PaymentReconcileAfterMinutes),
-                now.AddHours(-settings.PaymentReconcileWindowHours), cancellationToken),
-            await ExpireAsync(now, cancellationToken),
-            await RemindExpiringAsync(now, settings, cancellationToken),
-            await RemindMissingPlansAsync(now, settings, cancellationToken),
-            await RemindInactiveClientsAsync(now, settings, cancellationToken),
-            await RetryPendingRefundsAsync(now, cancellationToken));
+            await StepAsync("payment reconciliation", () => payments.ReconcilePendingAsync(
+                now.AddMinutes(-settings.PaymentReconcileAfterMinutes), now.AddHours(-settings.PaymentReconcileWindowHours), cancellationToken),
+                cancellationToken),
+            await StepAsync("expiry", () => ExpireAsync(now, cancellationToken), cancellationToken),
+            await StepAsync("expiring reminders", () => RemindExpiringAsync(now, settings, cancellationToken), cancellationToken),
+            await StepAsync("missing plan reminders", () => RemindMissingPlansAsync(now, settings, cancellationToken), cancellationToken),
+            await StepAsync("inactivity reminders", () => RemindInactiveClientsAsync(now, settings, cancellationToken), cancellationToken),
+            await StepAsync("refund retries", () => RetryPendingRefundsAsync(now, cancellationToken), cancellationToken));
 
         if (result != new LifecycleRunResult(0, 0, 0, 0, 0, 0))
             logger.LogInformation("Subscription lifecycle: {Result}", result);
         return result;
     }
 
-    /// <summary>Istek saradnje: Active s prošlim EndDate → Expired, obavijest klijentu i mentoru.</summary>
+    /// <summary>
+    /// Greška jednog koraka (npr. podsjetnik za pretplatu koju je klijent upravo otkazao: status je concurrency token, pa
+    /// snimanje ne uspijeva) se loguje, a ostali koraci se ipak izvršavaju; korak se ponavlja u sljedećem ciklusu.
+    /// </summary>
+    private async Task<int> StepAsync(string name, Func<Task<int>> step, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await step();
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Subscription lifecycle step '{Step}' failed; it will be retried in the next run.", name);
+            db.ChangeTracker.Clear();
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Istek saradnje: Active s prošlim EndDate → Expired, obavijest klijentu i mentoru. Svaka pretplata ide u svojoj
+    /// transakciji nad zaključanim redom (istovremeni confirm produženja čeka ili je već primijenjen), a greška jedne ne
+    /// zaustavlja ostale.
+    /// </summary>
     private async Task<int> ExpireAsync(DateTime now, CancellationToken cancellationToken)
     {
-        var expired = await SubscriptionsWithUsers()
+        var candidates = await db.Subscriptions.AsNoTracking()
             .Where(x => x.Status == SubscriptionStatus.Active && x.EndDate != null && x.EndDate < now)
+            .Select(x => x.Id)
             .ToListAsync(cancellationToken);
-        foreach (var subscription in expired) workflow.Expire(subscription, now);
+
+        var expired = 0;
+        var stripeReachable = true;
+        foreach (var subscriptionId in candidates)
+        {
+            try
+            {
+                var outcome = await ExpireOneAsync(subscriptionId, now, stripeReachable, cancellationToken);
+                if (outcome.Expired) expired++;
+                // Nedostupan Stripe (prekid veze ili timeout) se ne pita ponovo u ovom ciklusu: ostale pretplate ističu bez
+                // čekanja istog timeout-a, a njihove nepotvrđene uplate provjerava usklađivanje.
+                stripeReachable &= outcome.StripeReachable;
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Expiry of subscription {SubscriptionId} failed; it will be retried in the next run.", subscriptionId);
+                db.ChangeTracker.Clear();
+            }
+        }
+        return expired;
+    }
+
+    /// <summary>
+    /// Prije isteka se nepotvrđene uplate pretplate provjere na Stripe-u, bez obzira na starost: produženje plaćeno tik prije
+    /// isteka (confirm nije stigao) produžava pretplatu umjesto da bude vraćeno, a neplaćen PaymentIntent se otkazuje.
+    /// Ako Stripe nije dostupan, pretplata ipak ističe (naplaćeno produženje kasnije vraća usklađivanje).
+    /// </summary>
+    private async Task<(bool Expired, bool StripeReachable)> ExpireOneAsync(int subscriptionId, DateTime now, bool checkStripe,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockSubscriptionAsync(subscriptionId, cancellationToken);
+        var subscription = await SubscriptionsWithUsers().Include(x => x.Payments)
+            .FirstAsync(x => x.Id == subscriptionId, cancellationToken);
+        if (subscription.Status != SubscriptionStatus.Active || subscription.EndDate is not { } endDate || endDate >= now)
+            return (false, checkStripe);
+
+        var stripeReachable = checkStripe &&
+                              await workflow.SettlePendingPaymentsAsync(subscription, now, stripeErrorsAreFatal: false, cancellationToken);
+        var renewed = subscription.EndDate >= now;
+        if (!renewed) workflow.Expire(subscription, now);
+
         await db.SaveChangesAsync(cancellationToken);
-        return expired.Count;
+        await transaction.CommitAsync(cancellationToken);
+        return (!renewed, stripeReachable);
     }
 
     /// <summary>Podsjetnik klijentu N dana prije isteka (jednom po periodu; obnova resetuje podsjetnik).</summary>
@@ -73,7 +140,7 @@ public sealed class SubscriptionLifecycleProcessor(
         {
             subscription.ExpiryReminderSentAt = now;
             notifications.Notify(subscription.ClientProfile.User, NotificationType.SubscriptionExpiring, "Pretplata uskoro ističe",
-                $"Saradnja sa mentorom {subscription.MentorProfile.User.FullName} ističe {DomainTexts.Date(subscription.EndDate)}. " +
+                $"Saradnja sa mentorom {subscription.MentorProfile.User.FullName} ističe {DomainTexts.Date(subscription.EndDate, settings.TimeZoneId)} " +
                 "Produžite pretplatu u sekciji \"Pretplata\" kako biste zadržali svoj plan.",
                 sendEmail: true);
         }
@@ -96,7 +163,7 @@ public sealed class SubscriptionLifecycleProcessor(
         {
             subscription.PlanMissingReminderSentAt = now;
             notifications.Notify(subscription.MentorProfile.User, NotificationType.PlanMissing, "Klijent čeka trening plan",
-                $"Saradnja sa klijentom {subscription.ClientProfile.User.FullName} je aktivna od {DomainTexts.Date(subscription.AcceptedAt)}, " +
+                $"Saradnja sa klijentom {subscription.ClientProfile.User.FullName} je aktivna od {DomainTexts.Date(subscription.AcceptedAt, settings.TimeZoneId)}, " +
                 "a plan još nije objavljen. Izradite i objavite plan u sekciji \"Zahtjevi za saradnju\".",
                 sendEmail: true);
         }
@@ -135,19 +202,33 @@ public sealed class SubscriptionLifecycleProcessor(
         return inactive.Count;
     }
 
-    /// <summary>Ponovni pokušaj povrata za uplate koje nisu mogle biti primijenjene (status RefundPending).</summary>
+    /// <summary>
+    /// Ponovni pokušaj povrata za uplate koje nisu mogle biti primijenjene (status RefundPending). Neočekivana greška jedne
+    /// uplate (npr. Stripe 409 dok je isti povrat još u obradi) ne zaustavlja ostale.
+    /// </summary>
     private async Task<int> RetryPendingRefundsAsync(DateTime now, CancellationToken cancellationToken)
     {
-        var pending = await db.Payments
-            .Include(x => x.Subscription).ThenInclude(x => x.ClientProfile).ThenInclude(x => x.User)
+        var pending = await db.Payments.AsNoTracking()
             .Where(x => x.Status == PaymentStatus.RefundPending)
+            .Select(x => x.Id)
             .ToListAsync(cancellationToken);
 
         var completed = 0;
-        foreach (var payment in pending)
+        foreach (var paymentId in pending)
         {
-            if (await workflow.RetryPendingRefundAsync(payment, now, cancellationToken)) completed++;
-            await db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                var payment = await db.Payments
+                    .Include(x => x.Subscription).ThenInclude(x => x.ClientProfile).ThenInclude(x => x.User)
+                    .FirstAsync(x => x.Id == paymentId, cancellationToken);
+                if (await workflow.RetryPendingRefundAsync(payment, now, cancellationToken)) completed++;
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Refund retry of payment {PaymentId} failed; it will be retried in the next run.", paymentId);
+                db.ChangeTracker.Clear();
+            }
         }
         return completed;
     }

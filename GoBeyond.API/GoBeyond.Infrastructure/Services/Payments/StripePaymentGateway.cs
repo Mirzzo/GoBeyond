@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -12,6 +13,8 @@ namespace GoBeyond.Infrastructure.Services.Payments;
 
 /// <summary>
 /// Apstrakcija nad Stripe API-jem (PaymentIntents + Refunds + potpis webhook-a).
+/// Greške: nedostupan Stripe ili timeout → ValidationException (400), isti zahtjev još u obradi kod Stripe-a (409) →
+/// ConflictException sa <see cref="PaymentService.StillProcessing"/>.
 /// Svaki POST šalje Idempotency-Key, pa ponovljen zahtjev (npr. nakon prekida mreže) ne kreira
 /// drugi PaymentIntent niti drugi povrat.
 /// </summary>
@@ -23,6 +26,13 @@ public interface IPaymentGateway
     Task<PaymentIntentInfo> CreatePaymentIntentAsync(decimal amount, string receiptEmail, IReadOnlyDictionary<string, string> metadata,
         string idempotencyKey, CancellationToken cancellationToken);
     Task<PaymentIntentInfo> GetPaymentIntentAsync(string paymentIntentId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Otkazuje PaymentIntent koji se više ne smije platiti (zamijenjen, prestar, pretplata otkazana ili istekla) i vraća
+    /// njegovo konačno stanje. Ako se stanje u međuvremenu promijenilo (klijent je upravo platio: "succeeded", ili je već
+    /// "canceled"), vraća trenutno stanje, a pozivalac tada primjenjuje ili vraća uplatu.
+    /// </summary>
+    Task<PaymentIntentInfo> CancelPaymentIntentAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken);
     Task RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken);
     bool VerifyWebhookSignature(string payload, string signatureHeader, DateTimeOffset now);
 }
@@ -35,6 +45,8 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
     : IPaymentGateway
 {
     public const string ChargeAlreadyRefunded = "charge_already_refunded";
+    public const string IntentUnexpectedState = "payment_intent_unexpected_state";
+    public const string CommunicationFailed = "Komunikacija sa Stripe servisom nije uspjela. Pokušajte ponovo.";
     private const int WebhookToleranceSeconds = 300;
     private PaymentOptions Settings => options.Value;
 
@@ -59,10 +71,25 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
         return ParseIntent(await SendAsync(request, cancellationToken));
     }
 
+    /// <summary>latest_charge se proširuje radi vremena naplate (Payment.PaidAt je stvarno vrijeme plaćanja, ne vrijeme potvrde).</summary>
     public async Task<PaymentIntentInfo> GetPaymentIntentAsync(string paymentIntentId, CancellationToken cancellationToken)
     {
-        using var request = CreateRequest(HttpMethod.Get, $"payment_intents/{Uri.EscapeDataString(paymentIntentId)}", idempotencyKey: null);
+        using var request = CreateRequest(HttpMethod.Get,
+            $"payment_intents/{Uri.EscapeDataString(paymentIntentId)}?expand%5B%5D=latest_charge", idempotencyKey: null);
         return ParseIntent(await SendAsync(request, cancellationToken));
+    }
+
+    public async Task<PaymentIntentInfo> CancelPaymentIntentAsync(string paymentIntentId, string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Post, $"payment_intents/{Uri.EscapeDataString(paymentIntentId)}/cancel", idempotencyKey);
+        request.Content = new FormUrlEncodedContent(new Dictionary<string, string>());
+        var response = await SendAsync(request, cancellationToken, toleratedErrorCode: IntentUnexpectedState);
+        if (response.IsSuccessStatusCode) return ParseIntent(response);
+
+        // Plaćen (ili već otkazan) PaymentIntent se ne može otkazati - vraća se njegovo trenutno stanje.
+        response.Dispose();
+        return await GetPaymentIntentAsync(paymentIntentId, cancellationToken);
     }
 
     /// <summary>
@@ -138,7 +165,14 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
         catch (HttpRequestException ex)
         {
             logger.LogWarning(ex, "Stripe request failed.");
-            throw new ValidationException("Komunikacija sa Stripe servisom nije uspjela. Pokušajte ponovo.");
+            throw new ValidationException(CommunicationFailed);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // HttpClient.Timeout (Payments:RequestTimeoutSeconds): Stripe ili proxy nije odgovorio. To nije gašenje ni prekid
+            // zahtjeva, pa je ista greška kao prekid veze (inače 500 u API-ju i zaustavljen SubscriptionLifecycleService).
+            logger.LogWarning(ex, "Stripe request timed out.");
+            throw new ValidationException(CommunicationFailed);
         }
 
         if (response.IsSuccessStatusCode) return response;
@@ -149,6 +183,16 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
         {
             logger.LogInformation("Stripe answered {ErrorCode} for {Path}; the requested state already exists.", errorCode, path);
             return response;
+        }
+
+        if (response.StatusCode == HttpStatusCode.Conflict || errorCode is "idempotency_key_in_use" or "lock_timeout")
+        {
+            // Zahtjev sa istim Idempotency-Key-om (ili nad istim objektom) je kod Stripe-a još u obradi, npr. istovremeni
+            // create-intent ili povrat. Nije greška ključeva: ponovljen zahtjev nakon toga dobija rezultat prvog.
+            logger.LogInformation("Stripe answered {StatusCode} ({ErrorCode}) for {Path}; the same request is still in progress.",
+                (int)response.StatusCode, errorCode, path);
+            response.Dispose();
+            throw new ConflictException(PaymentService.StillProcessing);
         }
 
         // Tijelo greške se ne prosljeđuje klijentu (može sadržavati detalje zahtjeva); loguju se samo tip i kod greške.

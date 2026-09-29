@@ -13,14 +13,12 @@ public sealed class SubscriptionLifecycleService(
     IOptions<LifecycleOptions> options,
     ILogger<SubscriptionLifecycleService> logger) : BackgroundService
 {
-    private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(20);
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var interval = TimeSpan.FromSeconds(Math.Max(10, options.Value.IntervalSeconds));
         try
         {
-            await Task.Delay(StartupDelay, stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, options.Value.StartupDelaySeconds)), stoppingToken);
             using var timer = new PeriodicTimer(interval);
             do
             {
@@ -30,8 +28,10 @@ public sealed class SubscriptionLifecycleService(
                     var processor = scope.ServiceProvider.GetRequiredService<ISubscriptionLifecycleProcessor>();
                     await processor.RunAsync(DateTime.UtcNow, stoppingToken);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
                 {
+                    // Svaka greška osim gašenja (i OperationCanceledException, npr. HttpClient timeout prema Stripe-u) se
+                    // loguje i ponavlja u sljedećem ciklusu. Izuzetak koji napusti ExecuteAsync bi zaustavio cijeli API.
                     logger.LogError(ex, "Subscription lifecycle run failed; it will be retried in {Interval}.", interval);
                 }
             } while (await timer.WaitForNextTickAsync(stoppingToken));
