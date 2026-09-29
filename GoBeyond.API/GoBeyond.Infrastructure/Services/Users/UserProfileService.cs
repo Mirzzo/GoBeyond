@@ -55,7 +55,16 @@ public sealed class UserProfileService(
         if (user.Role == UserRole.Client && user.ClientProfile is not null)
             ProfileUpdater.ApplyClient(user.ClientProfile, request.Client!);
 
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Istovremeni zahtjev je u međuvremenu zauzeo korisničko ime/email: ista 400 greška kao kod sekvencijalnog zahtjeva.
+            await accountValidator.ThrowIfAccountTakenAsync(request, userId, cancellationToken);
+            throw;
+        }
         return await GetMeAsync(userId, cancellationToken);
     }
 

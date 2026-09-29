@@ -159,6 +159,34 @@ public sealed class AccountUniquenessRaceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateOwnProfile_LosingConcurrentRaceOnUsername_Returns400FieldError()
+    {
+        int userId;
+        await using (var seed = CreateContext())
+        {
+            var user = NewUser("race_me", "race_me@test.ba");
+            user.ClientProfile = new ClientProfile { WeightKg = 80, HeightCm = 180, FitnessLevelId = _levelId, FitnessGoalId = _goalId };
+            seed.Users.Add(user);
+            await seed.SaveChangesAsync();
+            userId = user.Id;
+        }
+
+        await using var db = CreateContext();
+        var validator = new RacingValidator(db, () => InsertCompetitor("race_me_novi", "other_5@test.ba"));
+        var service = new UserProfileService(db, validator, new FakeFileStorage());
+        var request = new UpdateProfileRequest
+        {
+            FirstName = "Test", LastName = "Korisnik", Username = "race_me_novi", Email = "race_me@test.ba",
+            DateOfBirth = new DateOnly(1990, 1, 1), GenderId = _genderId,
+            Client = new ClientProfileRequest { WeightKg = 80, HeightCm = 180, FitnessLevelId = _levelId, TrainingExperienceYears = 1, FitnessGoalId = _goalId }
+        };
+
+        var error = await Assert.ThrowsAsync<ValidationException>(() => service.UpdateMeAsync(userId, request));
+
+        Assert.Equal([UsernameTaken], error.Errors["username"]);
+    }
+
+    [Fact]
     public async Task UnrelatedSaveFailure_IsNotReportedAsTakenAccount()
     {
         await using var db = CreateContext();
