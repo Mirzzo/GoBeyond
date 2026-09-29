@@ -63,18 +63,7 @@ public sealed class Worker(
                 var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var consumer = new AsyncEventingBasicConsumer(channel);
                 consumer.ReceivedAsync += (_, delivery) => HandleAsync(channel, delivery, settings, stoppingToken);
-                consumer.UnregisteredAsync += (_, _) =>
-                {
-                    logger.LogWarning("Consumer was cancelled by the broker (e.g. the queue was deleted); reconnecting.");
-                    cancelled.TrySetResult();
-                    return Task.CompletedTask;
-                };
-                consumer.ShutdownAsync += (_, args) =>
-                {
-                    logger.LogWarning("Consumer channel shut down ({ReplyText}); reconnecting.", args.ReplyText);
-                    cancelled.TrySetResult();
-                    return Task.CompletedTask;
-                };
+                WireCancellationSignal(consumer, cancelled, logger);
                 await channel.BasicConsumeAsync(settings.Queue, autoAck: false, consumer, stoppingToken);
                 logger.LogInformation("Listening on queue {Queue} (dead-letter: {DeadLetterQueue}).", settings.Queue, settings.DeadLetterQueue);
 
@@ -115,6 +104,43 @@ public sealed class Worker(
     public static bool ShouldKeepConsuming(bool connectionOpen, bool channelOpen, bool consumerCancelled, CancellationToken stoppingToken) =>
         connectionOpen && channelOpen && !consumerCancelled && !stoppingToken.IsCancellationRequested;
 
+    /// <summary>
+    /// Kači se na <paramref name="consumer"/>-ove UnregisteredAsync/ShutdownAsync evente i signalizira
+    /// <paramref name="cancelled"/> prvi put kad se bilo koji od njih okine, tako da unutrašnja petlja u
+    /// <see cref="ExecuteAsync"/> stane i vanjska petlja se ponovo poveže (BG-02d). Izdvojeno iz
+    /// <see cref="ExecuteAsync"/> u zaseban metod da bi SAMO kačenje (ne samo čista funkcija
+    /// <see cref="ShouldKeepConsuming"/>) bilo pokriveno testom bez prave RabbitMQ konekcije - vidi
+    /// WorkerConsumerLoopTests, koji ovaj metod poziva nad pravim <see cref="AsyncEventingBasicConsumer"/>-om
+    /// (sa "stub" kanalom) i onda direktno zove HandleBasicCancelAsync/HandleChannelShutdownAsync - iste
+    /// metode koje RabbitMQ.Client-ova dispatch petlja zove kad broker otkaže consumer-a ili kanal padne.
+    /// Prije ovog izdvajanja, test je provjeravao samo <see cref="ShouldKeepConsuming"/> (čisto AND od bool-ova)
+    /// i i dalje bi prošao i kad bi neko slučajno obrisao samo kačenje evenata iz <see cref="ExecuteAsync"/> -
+    /// regresija bi tada prošla nezapaženo dok se ne testira ručno na pravom brokeru.
+    ///
+    /// UnregisteredAsync se okida i za pravi broker-side basic.cancel (npr. obrisan queue - kanal/konekcija
+    /// ostaju otvoreni, <c>consumer.ShutdownReason</c> je tad još uvijek null) I kao posljedica pada
+    /// kanala/konekcije (tada je ShutdownReason već postavljen, a ShutdownAsync se okine odmah zatim sa istim
+    /// razlogom - provjereno eksperimentalno protiv AsyncEventingBasicConsumer-a). Logujemo "otkazano od
+    /// brokera" poruku SAMO kad je ShutdownReason još null - inače bi ta poruka lažno sugerisala da je queue
+    /// obrisan pored tačnog razloga koji ShutdownAsync ionako loguje odmah zatim (review nit: log tačnost).
+    /// </summary>
+    public static void WireCancellationSignal(AsyncEventingBasicConsumer consumer, TaskCompletionSource cancelled, ILogger logger)
+    {
+        consumer.UnregisteredAsync += (_, _) =>
+        {
+            if (consumer.ShutdownReason is null)
+                logger.LogWarning("Consumer was cancelled by the broker (e.g. the queue was deleted); reconnecting.");
+            cancelled.TrySetResult();
+            return Task.CompletedTask;
+        };
+        consumer.ShutdownAsync += (_, args) =>
+        {
+            logger.LogWarning("Consumer channel shut down ({ReplyText}); reconnecting.", args.ReplyText);
+            cancelled.TrySetResult();
+            return Task.CompletedTask;
+        };
+    }
+
     private async Task HandleAsync(IChannel channel, BasicDeliverEventArgs delivery, RabbitMqOptions settings, CancellationToken stoppingToken)
     {
         var attempt = ReadAttempt(delivery.BasicProperties) + 1;
@@ -146,7 +172,9 @@ public sealed class Worker(
             return;
         }
 
-        if (sentMessageIds.WasSent(message.MessageId))
+        // MessageId sam NIJE dovoljan ključ (restartuje se od 1 kad se baza resetuje) - vidi EmailIdempotencyKey.
+        var idempotencyKey = EmailIdempotencyKey.For(message);
+        if (sentMessageIds.WasSent(idempotencyKey))
         {
             // Redelivery nakon pada procesa između uspješnog SMTP slanja i BasicAck-a (vidi SentMessageIdStore) -
             // email je stvarno već poslan, samo se potvrđuje bez ponovnog slanja (BG-06).
@@ -159,9 +187,6 @@ public sealed class Worker(
         try
         {
             await emailSender.SendAsync(message.RecipientEmail, message.Subject, message.Body, stoppingToken);
-            sentMessageIds.MarkSent(message.MessageId);
-            await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
-            logger.LogInformation("Email {MessageId} ({EventType}) sent to {Recipient}.", message.MessageId, message.EventType, message.RecipientEmail);
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
@@ -179,7 +204,15 @@ public sealed class Worker(
                 await PublishAsync(channel, settings.Queue, delivery, attempt, stoppingToken);
             }
             await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+            return;
         }
+
+        // SMTP je u ovom trenutku VEĆ potvrdio slanje - greška u bilježenju (IO/zaključan fajl) NIKAD ne smije
+        // izgledati kao neuspjelo slanje (review defekt): MarkSent sam hvata i loguje svoje IO greške, nikad
+        // ne baca, pa se ack ispod dešava bez obzira na to da li je upis u store uspio.
+        sentMessageIds.MarkSent(idempotencyKey);
+        await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+        logger.LogInformation("Email {MessageId} ({EventType}) sent to {Recipient}.", message.MessageId, message.EventType, message.RecipientEmail);
     }
 
     private static int ReadAttempt(IReadOnlyBasicProperties properties)

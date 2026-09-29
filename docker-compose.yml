@@ -99,8 +99,9 @@ services:
       # (npr. na Gmail) i onda ove vrijednosti pobjeđuju - vidi .env.example.
       Smtp__Host: ${Smtp__Host:-mailpit}
       Smtp__Port: ${Smtp__Port:-1025}
-      # Fajl sa Id-evima poslanih emailova (idempotencija kod redelivery-a nakon pada - vidi SentMessageIdStore)
-      # na imenovanom volume-u ispod, da preživi restart/recreate kontejnera.
+      # Fajl sa ključevima poslanih emailova (idempotencija kod redelivery-a nakon pada - vidi SentMessageIdStore
+      # i EmailIdempotencyKey; ključ NIJE sam outbox Id, koji se restartuje od 1 kad se baza resetuje) na
+      # imenovanom volume-u ispod, da preživi restart/recreate kontejnera. Apsolutna putanja - ne ide u repo.
       Smtp__SentMessageIdsFilePath: /data/gobeyond-consumer-sent-ids.txt
     volumes:
       - gobeyond-email-consumer-data:/data

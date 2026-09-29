@@ -88,7 +88,11 @@ public sealed class OutboxDispatcher(
             entry.Attempts++;
             try
             {
-                var message = new EmailNotificationMessage(entry.Id, entry.EventType, entry.RecipientEmail, entry.Subject, entry.Body);
+                // CreatedAtTicks lets EmailConsumer build an idempotency key that survives a database reset:
+                // entry.Id alone restarts from 1 whenever OutboxMessages is recreated, so without it a
+                // different email that reuses an old Id could be mistaken for one already sent (see
+                // EmailNotificationMessage's doc comment / EmailConsumer.Services.EmailIdempotencyKey).
+                var message = new EmailNotificationMessage(entry.Id, entry.EventType, entry.RecipientEmail, entry.Subject, entry.Body, entry.CreatedAt.Ticks);
                 await channel.BasicPublishAsync(
                     exchange: string.Empty,
                     routingKey: settings.Queue,

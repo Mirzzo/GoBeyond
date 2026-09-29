@@ -1,4 +1,7 @@
 using GoBeyond.EmailConsumer;
+using Microsoft.Extensions.Logging.Abstractions;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 
 namespace GoBeyond.Tests.Email;
 
@@ -45,5 +48,58 @@ public class WorkerConsumerLoopTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         Assert.False(Worker.ShouldKeepConsuming(connectionOpen: true, channelOpen: true, consumerCancelled: false, cts.Token));
+    }
+
+    // Review defect: the tests above only exercise ShouldKeepConsuming, a pure boolean AND. They still pass
+    // even if the actual event wiring (consumer.UnregisteredAsync/ShutdownAsync -> cancelled.TrySetResult())
+    // is deleted from Worker.ExecuteAsync, because nothing calls Worker.WireCancellationSignal at all. The
+    // tests below exercise that wiring directly against a REAL AsyncEventingBasicConsumer (with a stub
+    // IChannel - NoOpChannel - that is never actually used), calling the same Handle*Async methods
+    // RabbitMQ.Client's own dispatch loop calls when the broker cancels the consumer or the channel shuts
+    // down. Deleting the UnregisteredAsync/ShutdownAsync subscriptions from WireCancellationSignal makes
+    // these fail (the TaskCompletionSource never completes), unlike the ShouldKeepConsuming-only tests above.
+
+    [Fact]
+    public async Task WireCancellationSignal_CompletesTask_WhenBrokerCancelsConsumer()
+    {
+        // Simulates BG-02d: the broker sends basic.cancel (e.g. because the queue was deleted). The channel
+        // and connection stay open; only the consumer is unregistered.
+        var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance);
+
+        Assert.False(cancelled.Task.IsCompleted);
+
+        await consumer.HandleBasicCancelAsync("consumer-tag", CancellationToken.None);
+
+        Assert.True(cancelled.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task WireCancellationSignal_CompletesTask_WhenChannelShutsDown()
+    {
+        // Simulates a dropped/force-closed connection (e.g. BG-02d's force-close variant): the channel itself
+        // shuts down, which also unregisters the consumer.
+        var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance);
+
+        var reason = new ShutdownEventArgs(ShutdownInitiator.Peer, 320, "CONNECTION_FORCED - Closed via management plugin");
+        await consumer.HandleChannelShutdownAsync(new NoOpChannel(), reason);
+
+        Assert.True(cancelled.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task WireCancellationSignal_DoesNotCompleteTask_WhenConsumerIsRegisteredOk()
+    {
+        // Control: a normal successful registration (basic.consume-ok) must NOT trigger a reconnect.
+        var consumer = new AsyncEventingBasicConsumer(new NoOpChannel());
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Worker.WireCancellationSignal(consumer, cancelled, NullLogger.Instance);
+
+        await consumer.HandleBasicConsumeOkAsync("consumer-tag", CancellationToken.None);
+
+        Assert.False(cancelled.Task.IsCompleted);
     }
 }

@@ -22,6 +22,10 @@ gobeyond-web/
 *.log
 .env
 
+# EmailConsumer sent-ids idempotency store (should resolve outside the repo - see SentMessageIdStore.ResolvePath
+# - but ignored too in case a relative override is ever set).
+gobeyond-consumer-sent-ids.txt
+
 # Local requirement sources (prijava/upute text and mockups)
 docs/requirements/
 
