@@ -27,7 +27,8 @@ public sealed class SmtpOptions
     /// poruka koje su već uspješno poslane preko SMTP-a - idempotencija kod redelivery-a sa brokera nakon
     /// pada procesa između SMTP slanja i BasicAck-a (vidi <see cref="Services.SentMessageIdStore"/>). U
     /// docker-compose je postavljena na apsolutnu putanju na imenovanom volume-u (<c>/data/...</c>) da
-    /// preživi restart/recreate kontejnera. Prazna vrijednost isključuje provjeru (npr. u testovima).
+    /// preživi restart/recreate kontejnera. Prazna vrijednost znači bez fajla (npr. u testovima): ključevi se
+    /// pamte samo u memoriji procesa, pa provjera i dalje radi, ali ne preživljava restart.
     /// Relativna vrijednost (podrazumijevana u appsettings.Shared.json, za pokretanje van docker-a) se NIKAD
     /// ne rješava protiv trenutnog radnog direktorija - <see cref="Services.SentMessageIdStore.ResolvePath"/>
     /// je umjesto toga rješava protiv OS temp foldera, da golo <c>dotnet run</c> iz root-a repozitorija ne
