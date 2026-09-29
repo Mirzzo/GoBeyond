@@ -75,10 +75,11 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     );
     if (!confirmed) return;
     try {
-      await _service.deleteUser(user['id'] as int);
+      final warning = await _service.deleteUser(user['id'] as int);
       if (!mounted) return;
       showSuccessSnack(context, 'Korisnik ${user['fullName']} je obrisan.');
       _load();
+      await showPaymentWarningIfAny(context, warning);
     } catch (error) {
       if (!mounted) return;
       showErrorSnack(context, ApiError.from(error).message);

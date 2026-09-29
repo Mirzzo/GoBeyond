@@ -52,8 +52,12 @@ class AdminService {
     return _map(response);
   }
 
-  Future<void> deleteUser(int id) async {
-    await _dio.delete<void>('/api/admin/users/$id');
+  /// Returns the response `warning` (a disputed charge that was not
+  /// refunded), or null.
+  Future<String?> deleteUser(int id) async {
+    final response = await _dio.delete<dynamic>('/api/admin/users/$id');
+    final data = response.data;
+    return data is Map ? data['warning'] as String? : null;
   }
 
   // ---- Mentors & requests ----

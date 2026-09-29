@@ -164,6 +164,37 @@ class SubscriptionStatusPresentation {
   static Color color(String status) => _colors[status] ?? AppColors.textMuted;
 }
 
+/// `Payment.status` (api-contract.md §1). `Disputed`: the charge is disputed
+/// at the client's bank, so it was not refunded and the dispute on Stripe
+/// decides the outcome. An unknown value is shown as-is.
+class PaymentStatusPresentation {
+  const PaymentStatusPresentation._();
+
+  static const Map<String, String> _labels = {
+    'Pending': 'Na čekanju',
+    'Succeeded': 'Uspješno',
+    'Failed': 'Neuspješno',
+    'Refunded': 'Refundirano',
+    'RefundPending': 'Povrat novca u obradi',
+    'Disputed': 'Osporeno',
+  };
+
+  static const Map<String, Color> _colors = {
+    'Pending': Color(0xFFE0A64F),
+    'Succeeded': AppColors.success,
+    'Failed': AppColors.danger,
+    'Refunded': Color(0xFF9E9E9E),
+    'RefundPending': Color(0xFFE0A64F),
+    'Disputed': AppColors.danger,
+  };
+
+  static String label(String status) => _labels[status] ?? status;
+  static Color color(String status) => _colors[status] ?? AppColors.textMuted;
+
+  /// `Payment.purpose`: Initial or Renewal.
+  static String purposeLabel(String purpose) => purpose == 'Renewal' ? 'Produženje' : 'Početna uplata';
+}
+
 class PlanStatusPresentation {
   const PlanStatusPresentation._();
 

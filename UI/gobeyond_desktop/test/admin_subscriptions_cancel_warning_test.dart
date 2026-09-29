@@ -8,10 +8,11 @@ import 'support/fake_api_interceptor.dart';
 /// The OTKAŽI confirmation dialog must describe what admin cancel really
 /// does (api-contract.md §5): the client is always notified, the mentor only
 /// when the request reached them (never for an unpaid PendingPayment
-/// subscription), and a paid AwaitingMentor request is refunded.
+/// subscription), and a paid AwaitingMentor request is refunded unless the
+/// charge is disputed at the client's bank.
 void main() {
   group('subscriptionCancelWarning', () {
-    test('mentions the refund for an AwaitingMentor subscription', () {
+    test('mentions the refund and the disputed-charge exception for an AwaitingMentor subscription', () {
       final warning = subscriptionCancelWarning(
         status: 'AwaitingMentor',
         clientFullName: 'Amina Hodžić',
@@ -19,7 +20,7 @@ void main() {
       );
       expect(warning, contains('Amina Hodžić'));
       expect(warning, contains('Kenan Omerović'));
-      expect(warning, contains('uplata će biti vraćena'));
+      expect(warning, contains('uplata će biti vraćena, osim ako je naplata osporena kod banke klijenta.'));
     });
 
     test('names both parties and no refund for an Active subscription', () {
@@ -92,11 +93,11 @@ void main() {
       expect(warning, 'Klijent (Amina Hodžić) dobija obavijest o otkazivanju. Mentor ne dobija obavijest jer zahtjev nije plaćen.');
     });
 
-    testWidgets('AwaitingMentor: the dialog names both parties and the refund', (tester) async {
+    testWidgets('AwaitingMentor: the dialog names both parties and the refund, except for a disputed charge', (tester) async {
       final warning = await openCancelWarning(tester, 'AwaitingMentor');
 
       expect(warning, 'Klijent (Amina Hodžić) i mentor (Kenan Omerović) će biti obaviješteni o otkazivanju. '
-          'Klijentova uplata će biti vraćena.');
+          'Klijentova uplata će biti vraćena, osim ako je naplata osporena kod banke klijenta.');
     });
   });
 }

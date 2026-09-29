@@ -138,10 +138,11 @@ class _AdminMentorsScreenState extends State<AdminMentorsScreen> {
     );
     if (!confirmed) return;
     try {
-      await _service.deleteUser(mentor['userId'] as int);
+      final warning = await _service.deleteUser(mentor['userId'] as int);
       if (!mounted) return;
       showSuccessSnack(context, 'Mentor ${mentor['fullName']} je obrisan.');
       _load();
+      await showPaymentWarningIfAny(context, warning);
     } catch (error) {
       if (!mounted) return;
       showErrorSnack(context, ApiError.from(error).message);

@@ -14,7 +14,8 @@ const _statusOptions = ['PendingPayment', 'AwaitingMentor', 'Active', 'Rejected'
 /// mentor only when the request reached them. A PendingPayment subscription
 /// was never paid, so the mentor never saw it and gets no notification. An
 /// AwaitingMentor subscription was paid but not yet accepted, so the
-/// client's payment is refunded, the same way mentor reject warns about it.
+/// client's payment is refunded, unless the charge is disputed at the
+/// client's bank (Stripe then refuses the refund).
 String subscriptionCancelWarning({
   required String? status,
   required String clientFullName,
@@ -25,10 +26,15 @@ String subscriptionCancelWarning({
   }
   final base = 'Klijent ($clientFullName) i mentor ($mentorFullName) će biti obaviješteni o otkazivanju.';
   if (status == 'AwaitingMentor') {
-    return '$base Klijentova uplata će biti vraćena.';
+    return '$base Klijentova uplata će biti vraćena, osim ako je naplata osporena kod banke klijenta.';
   }
   return base;
 }
+
+/// Whether any payment of an AdminSubscription is `Disputed` (not refunded,
+/// the dispute on Stripe decides the outcome).
+bool hasDisputedPayment(Map<String, dynamic> subscription) =>
+    (subscription['payments'] as List<dynamic>? ?? const []).any((p) => p is Map && p['status'] == 'Disputed');
 
 /// UPRAVLJANJE PRETPLATAMA.
 class AdminSubscriptionsScreen extends StatefulWidget {
@@ -94,6 +100,10 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
           _row('Početak', Formatters.date(subscription['startDate'] as String?)),
           _row('Kraj', Formatters.date(subscription['endDate'] as String?)),
           if ((subscription['statusReason'] as String?)?.isNotEmpty == true) _row('Napomena', subscription['statusReason'] as String),
+          const SizedBox(height: 12),
+          const Text('Uplate', style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          ..._paymentRows(subscription['payments']),
         ],
       ),
       actions: [
@@ -111,6 +121,32 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
         ],
       ],
     );
+  }
+
+  List<Widget> _paymentRows(Object? payments) {
+    final list = (payments as List<dynamic>? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    if (list.isEmpty) {
+      return const [Text('Nema uplata.', style: TextStyle(color: AppColors.textMuted))];
+    }
+    return list.map((payment) {
+      final status = payment['status'] as String? ?? '';
+      final amount = Formatters.money(payment['amount'] as num?, currency: payment['currency'] as String? ?? 'usd');
+      final date = Formatters.date((payment['paidAt'] ?? payment['createdAt']) as String?);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${PaymentStatusPresentation.purposeLabel(payment['purpose'] as String? ?? '')} · $amount · $date',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+            StatusChip(label: PaymentStatusPresentation.label(status), color: PaymentStatusPresentation.color(status)),
+          ],
+        ),
+      );
+    }).toList();
   }
 
   Widget _row(String label, String value) {
@@ -142,10 +178,11 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
     );
     if (reason == null) return;
     try {
-      await _service.cancelSubscription(subscription['id'] as int, reason);
+      final result = await _service.cancelSubscription(subscription['id'] as int, reason);
       if (!mounted) return;
       showSuccessSnack(context, 'Pretplata je otkazana.');
       _load();
+      await showPaymentWarningIfAny(context, result['warning']);
     } catch (error) {
       if (!mounted) return;
       showErrorSnack(context, ApiError.from(error).message);
@@ -201,7 +238,16 @@ class _AdminSubscriptionsScreenState extends State<AdminSubscriptionsScreen> {
                               DataCell(Text(subscription['clientFullName'] as String? ?? '-')),
                               DataCell(Text(subscription['mentorFullName'] as String? ?? '-')),
                               DataCell(Text(subscription['trainingTypeName'] as String? ?? '-')),
-                              DataCell(StatusChip(label: SubscriptionStatusPresentation.label(status), color: SubscriptionStatusPresentation.color(status))),
+                              DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
+                                StatusChip(label: SubscriptionStatusPresentation.label(status), color: SubscriptionStatusPresentation.color(status)),
+                                if (hasDisputedPayment(subscription)) ...[
+                                  const SizedBox(width: 6),
+                                  const Tooltip(
+                                    message: 'Uplata je osporena kod banke klijenta i nije vraćena.',
+                                    child: Icon(Icons.report_problem_outlined, color: AppColors.danger, size: 18),
+                                  ),
+                                ],
+                              ])),
                               DataCell(Text(Formatters.money(subscription['price'] as num?, currency: subscription['currency'] as String? ?? 'usd'))),
                               DataCell(Text('${Formatters.date(subscription['startDate'] as String?)} - ${Formatters.date(subscription['endDate'] as String?)}')),
                               DataCell(PillButton(label: 'DETALJI', dense: true, onPressed: () => _openDetail(subscription))),

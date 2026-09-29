@@ -248,6 +248,34 @@ class _ReasonDialogState extends State<_ReasonDialog> {
   }
 }
 
+/// Dialog with a warning the user must read and confirm (a snack bar
+/// disappears on its own), e.g. a payment that was not refunded.
+Future<void> showWarningDialog(BuildContext context, {required String title, required String message}) {
+  return showGbDialog<void>(
+    context: context,
+    title: title,
+    width: 480,
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.report_problem_outlined, color: AppColors.danger),
+        const SizedBox(width: 10),
+        Expanded(child: Text(message, style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4))),
+      ],
+    ),
+    actions: [
+      ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('U redu')),
+    ],
+  );
+}
+
+/// Shows the `warning` of an admin cancel or user deletion response
+/// (api-contract.md §5), if there is one.
+Future<void> showPaymentWarningIfAny(BuildContext context, Object? warning) async {
+  if (warning is! String || warning.trim().isEmpty) return;
+  await showWarningDialog(context, title: 'Uplata nije vraćena', message: warning);
+}
+
 void showSuccessSnack(BuildContext context, String message) {
   ScaffoldMessenger.of(context).hideCurrentSnackBar();
   ScaffoldMessenger.of(context).showSnackBar(

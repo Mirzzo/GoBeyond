@@ -137,10 +137,11 @@ class _AdminClientsScreenState extends State<AdminClientsScreen> {
     );
     if (!confirmed) return;
     try {
-      await _service.deleteUser(client['userId'] as int);
+      final warning = await _service.deleteUser(client['userId'] as int);
       if (!mounted) return;
       showSuccessSnack(context, 'Klijent ${client['fullName']} je obrisan.');
       _load();
+      await showPaymentWarningIfAny(context, warning);
     } catch (error) {
       if (!mounted) return;
       showErrorSnack(context, ApiError.from(error).message);
