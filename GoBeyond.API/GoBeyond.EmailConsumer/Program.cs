@@ -16,6 +16,7 @@ builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOpt
 builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection(RabbitMqOptions.SectionName));
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 builder.Services.AddSingleton<SentMessageIdStore>();
+builder.Services.AddSingleton<InFlightSendGate>();
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();

@@ -18,14 +18,15 @@ namespace GoBeyond.EmailConsumer;
 /// Poruke za primaoce na zaštićenim domenama (<see cref="SmtpOptions.SuppressedRecipientDomains"/>) se
 /// ne šalju kad host nije Mailpit - vidi <see cref="RecipientSuppression"/>. Poruke koje su već jednom
 /// uspješno poslane (redelivery nakon pada procesa) se prepoznaju preko <see cref="SentMessageIdStore"/> i
-/// samo ack-uju, bez ponovnog slanja.
+/// samo ack-uju, bez ponovnog slanja; redelivery DOK je prvi pokušaj još u toku pokriva <see cref="InFlightSendGate"/>.
 /// </summary>
 public sealed class Worker(
     ILogger<Worker> logger,
     IOptions<RabbitMqOptions> options,
     IOptions<SmtpOptions> smtpOptions,
     IEmailSender emailSender,
-    SentMessageIdStore sentMessageIds) : BackgroundService
+    SentMessageIdStore sentMessageIds,
+    InFlightSendGate inFlightSends) : BackgroundService
 {
     private const string AttemptHeader = "x-attempt";
 
@@ -186,9 +187,14 @@ public sealed class Worker(
             return;
         }
 
+        bool sentByThisCall;
         try
         {
-            await emailSender.SendAsync(message.RecipientEmail, message.Subject, message.Body, stoppingToken);
+            // Redelivery ISTOG ključa dok je ovaj pokušaj u toku (npr. RabbitMQ.Client automatski oporavi
+            // konekciju dok je SMTP send i dalje u toku) čeka ovaj pokušaj umjesto da šalje ponovo - vidi
+            // InFlightSendGate.
+            sentByThisCall = await inFlightSends.RunAsync(idempotencyKey,
+                () => emailSender.SendAsync(message.RecipientEmail, message.Subject, message.Body, stoppingToken));
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
@@ -212,8 +218,16 @@ public sealed class Worker(
         // Loguje se PRIJE ack-a: ako ack propadne (npr. kanal se u međuvremenu zatvorio), trag o uspješnom
         // slanju ostaje u logu umjesto da nestane zajedno sa izuzetkom. MarkSent sam hvata svoje IO greške i
         // nikad ne baca, pa se ack ispod dešava bez obzira na to da li je upis u store uspio.
-        sentMessageIds.MarkSent(idempotencyKey);
-        logger.LogInformation("Email {MessageId} ({EventType}) sent to {Recipient}.", message.MessageId, message.EventType, message.RecipientEmail);
+        if (sentByThisCall)
+        {
+            sentMessageIds.MarkSent(idempotencyKey);
+            logger.LogInformation("Email {MessageId} ({EventType}) sent to {Recipient}.", message.MessageId, message.EventType, message.RecipientEmail);
+        }
+        else
+        {
+            logger.LogInformation("Email {MessageId} ({EventType}) already sent by a concurrent in-flight attempt for the same message; acking without resending.",
+                message.MessageId, message.EventType);
+        }
         await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
     }
 
