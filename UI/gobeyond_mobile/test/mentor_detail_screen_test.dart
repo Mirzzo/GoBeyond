@@ -144,7 +144,7 @@ void main() {
 
   testWidgets(
       'an AwaitingMentor blocking subscription shows the "still waiting" '
-      'text, not the cancel-a-paid-subscription text', (tester) async {
+      'text, not the cancel-first text', (tester) async {
     await useTallSurface(tester);
     final mentorRepository = FakeMentorRepository()
       ..mentorsById = {1: _detail(1, 'Marko Marković')};
@@ -167,27 +167,32 @@ void main() {
     expect(find.textContaining('Otkažite postojeću pretplatu'), findsNothing);
   });
 
-  testWidgets('an Active blocking subscription keeps the cancel-first text',
-      (tester) async {
-    await useTallSurface(tester);
-    final mentorRepository = FakeMentorRepository()
-      ..mentorsById = {1: _detail(1, 'Marko Marković')};
-    final subscriptionRepository = FakeSubscriptionRepository()
-      ..subscriptions = [_subscription('Active')];
+  // The client can cancel an unpaid PendingPayment as well as an Active
+  // subscription, so both keep the cancel-first text.
+  for (final status in ['PendingPayment', 'Active']) {
+    testWidgets('a blocking $status subscription keeps the cancel-first text',
+        (tester) async {
+      await useTallSurface(tester);
+      final mentorRepository = FakeMentorRepository()
+        ..mentorsById = {1: _detail(1, 'Marko Marković')};
+      final subscriptionRepository = FakeSubscriptionRepository()
+        ..subscriptions = [_subscription(status)];
 
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.theme,
-        home: MentorDetailScreen(
-          mentorProfileId: 1,
-          mentorRepository: mentorRepository,
-          subscriptionRepository: subscriptionRepository,
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.theme,
+          home: MentorDetailScreen(
+            mentorProfileId: 1,
+            mentorRepository: mentorRepository,
+            subscriptionRepository: subscriptionRepository,
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('Otkažite postojeću pretplatu'), findsOneWidget);
-    expect(find.textContaining('još čeka odgovor'), findsNothing);
-  });
+      expect(
+          find.textContaining('Otkažite postojeću pretplatu'), findsOneWidget);
+      expect(find.textContaining('još čeka odgovor'), findsNothing);
+    });
+  }
 }
