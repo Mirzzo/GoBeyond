@@ -27,6 +27,7 @@
     <ProjectReference Include="..\GoBeyond.API\GoBeyond.API.csproj" />
     <ProjectReference Include="..\GoBeyond.Core\GoBeyond.Core.csproj" />
     <ProjectReference Include="..\GoBeyond.Infrastructure\GoBeyond.Infrastructure.csproj" />
+    <ProjectReference Include="..\GoBeyond.EmailConsumer\GoBeyond.EmailConsumer.csproj" />
   </ItemGroup>
 
 </Project>

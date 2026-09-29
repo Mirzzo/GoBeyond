@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using GoBeyond.Contracts;
 using GoBeyond.Contracts.Messages;
+using GoBeyond.EmailConsumer.Options;
 using GoBeyond.EmailConsumer.Services;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
@@ -13,8 +14,14 @@ namespace GoBeyond.EmailConsumer;
 /// Pomoćni mikroservis: sluša RabbitMQ queue "gobeyond.notifications" i šalje emailove preko SMTP-a.
 /// Neuspjela poruka se ponovo objavljuje sa uvećanim brojačem pokušaja (header x-attempt);
 /// nakon MaxAttempts (5) ili za neispravan JSON ide u dead-letter queue - nema beskonačnog requeue-a.
+/// Poruke za primaoce na zaštićenim domenama (<see cref="SmtpOptions.SuppressedRecipientDomains"/>) se
+/// ne šalju kad host nije Mailpit - vidi <see cref="RecipientSuppression"/>.
 /// </summary>
-public sealed class Worker(ILogger<Worker> logger, IOptions<RabbitMqOptions> options, IEmailSender emailSender) : BackgroundService
+public sealed class Worker(
+    ILogger<Worker> logger,
+    IOptions<RabbitMqOptions> options,
+    IOptions<SmtpOptions> smtpOptions,
+    IEmailSender emailSender) : BackgroundService
 {
     private const string AttemptHeader = "x-attempt";
 
@@ -90,6 +97,16 @@ public sealed class Worker(ILogger<Worker> logger, IOptions<RabbitMqOptions> opt
         {
             logger.LogError("Invalid notification payload moved to dead-letter queue.");
             await PublishAsync(channel, settings.DeadLetterQueue, delivery, attempt, stoppingToken);
+            await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+            return;
+        }
+
+        var smtp = smtpOptions.Value;
+        if (RecipientSuppression.ShouldSuppress(smtp.Host, message.RecipientEmail, smtp.SuppressedRecipientDomains))
+        {
+            logger.LogInformation(
+                "Email {MessageId} ({EventType}) suppressed: recipient domain '{Domain}' is on Smtp:SuppressedRecipientDomains (host {Host} is not Mailpit).",
+                message.MessageId, message.EventType, RecipientSuppression.ExtractDomain(message.RecipientEmail), smtp.Host);
             await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
             return;
         }

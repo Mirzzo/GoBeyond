@@ -12,4 +12,11 @@ public sealed class SmtpOptions
     public string FromEmail { get; set; } = string.Empty;
     public string FromName { get; set; } = string.Empty;
     public bool UseSsl { get; set; }
+
+    /// <summary>
+    /// Domene primaoca (npr. "gobeyond.ba") kojima se email NE šalje kroz stvarni SMTP kada host nije Mailpit
+    /// (vidi <see cref="Services.RecipientSuppression"/>). Štiti realni SMTP nalog i treće strane od demo/seed
+    /// adresa koje nisu prave poštanske adrese pod našom kontrolom.
+    /// </summary>
+    public string[] SuppressedRecipientDomains { get; set; } = [];
 }

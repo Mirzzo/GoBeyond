@@ -95,8 +95,10 @@ services:
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USERNAME:-gobeyond}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-GoBeyondDemoRabbit}
-      Smtp__Host: mailpit
-      Smtp__Port: 1025
+      # Mailpit je podrazumijevano (bezbjedno, sve ostaje na mašini); .env može postaviti Smtp__Host/Smtp__Port
+      # (npr. na Gmail) i onda ove vrijednosti pobjeđuju - vidi .env.example.
+      Smtp__Host: ${Smtp__Host:-mailpit}
+      Smtp__Port: ${Smtp__Port:-1025}
     depends_on:
       rabbitmq:
         condition: service_healthy

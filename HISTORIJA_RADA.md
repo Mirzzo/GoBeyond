@@ -125,6 +125,13 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
   Dodano čitanje root `.env` pri lokalnom pokretanju (ne gazi Docker varijable). 148 testova. Preporuka: valuta ostaje USD (konverzija u EUR ~2% naknade, min. iznos OK).
 - README ažuriran (Stripe sekcija, testne kartice, webhook opcionalno, `.env` i za lokalno pokretanje).
 
+## Sesija 3b (29.09.2026.) — pravi email (Gmail SMTP)
+
+- Korisnik je dao Gmail nalog `appstayhard@gmail.com` + app password. SMTP postavke upisane u root `.env` (gitignored); prijava na smtp.gmail.com:587 (STARTTLS) provjerena.
+- Uočeno: docker-compose hardkodira `Smtp__Host: mailpit` za email-consumer (gazi `.env`); seed korisnici imaju adrese `@gobeyond.ba` → s pravim SMTP-om bi slali na tuđu domenu i generisali bounce-ove.
+- Agent `email` (Sonnet): compose default na Mailpit samo bez `.env`, zabrana slanja na seed domene, provjera stvarne dostave (IMAP, samo test poruka), .env.example/README, testovi.
+- email **9/10 — prihvaćeno**: compose `Smtp__Host: ${Smtp__Host:-mailpit}` (bez `.env` sve ide u Mailpit kao prije), `Smtp:SuppressedRecipientDomains: ["gobeyond.ba"]` — mailovi seed korisnicima se ne šalju preko pravog SMTP-a (samo log, bez retry-a). Stvarna dostava potvrđena preko IMAP-a (plus-adresa, č/ć/š/đ ispravni, test poruka obrisana). 162 testa. Stack radi sa Gmail postavkama iz `.env`. Gmail limit ~500 mailova/dan.
+
 ## Sljedeći koraci (korisnik)
 
 1. **Stripe ključevi za ocjenjivača:** ključevi su lokalno u `.env` (29.09.2026.), ali `.env` se ne commituje. Treba odlučiti kako ih ocjenjivač dobija (npr. `.env` u zip-u sa lozinkom, ili prema uputama za predaju).
