@@ -99,13 +99,18 @@ services:
       # (npr. na Gmail) i onda ove vrijednosti pobjeđuju - vidi .env.example.
       Smtp__Host: ${Smtp__Host:-mailpit}
       Smtp__Port: ${Smtp__Port:-1025}
+      # Fajl sa Id-evima poslanih emailova (idempotencija kod redelivery-a nakon pada - vidi SentMessageIdStore)
+      # na imenovanom volume-u ispod, da preživi restart/recreate kontejnera.
+      Smtp__SentMessageIdsFilePath: /data/gobeyond-consumer-sent-ids.txt
+    volumes:
+      - gobeyond-email-consumer-data:/data
     depends_on:
       rabbitmq:
         condition: service_healthy
       mailpit:
         condition: service_healthy
     healthcheck:
-      # Worker osvježava ovaj fajl svakih 15 s dok je povezan na RabbitMQ.
+      # Worker osvježava ovaj fajl svakih 15 s dok je consumer stvarno registrovan kod brokera.
       test: ['CMD-SHELL', 'find /tmp/gobeyond-consumer.alive -mmin -1 | grep -q .']
       interval: 20s
       timeout: 5s
@@ -118,3 +123,4 @@ volumes:
   gobeyond-rabbitdata:
   gobeyond-uploads:
   gobeyond-private-files:
+  gobeyond-email-consumer-data:

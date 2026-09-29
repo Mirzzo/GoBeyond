@@ -13,19 +13,23 @@ namespace GoBeyond.EmailConsumer;
 /// <summary>
 /// Pomoćni mikroservis: sluša RabbitMQ queue "gobeyond.notifications" i šalje emailove preko SMTP-a.
 /// Neuspjela poruka se ponovo objavljuje sa uvećanim brojačem pokušaja (header x-attempt);
-/// nakon MaxAttempts (5) ili za neispravan JSON ide u dead-letter queue - nema beskonačnog requeue-a.
+/// nakon MaxAttempts (5), za neispravan JSON ili za poruku bez obaveznih polja (<see cref="NotificationMessageValidator"/>)
+/// ide u dead-letter queue - nema beskonačnog requeue-a i nema slanja praznog emaila.
 /// Poruke za primaoce na zaštićenim domenama (<see cref="SmtpOptions.SuppressedRecipientDomains"/>) se
-/// ne šalju kad host nije Mailpit - vidi <see cref="RecipientSuppression"/>.
+/// ne šalju kad host nije Mailpit - vidi <see cref="RecipientSuppression"/>. Poruke koje su već jednom
+/// uspješno poslane (redelivery nakon pada procesa) se prepoznaju preko <see cref="SentMessageIdStore"/> i
+/// samo ack-uju, bez ponovnog slanja.
 /// </summary>
 public sealed class Worker(
     ILogger<Worker> logger,
     IOptions<RabbitMqOptions> options,
     IOptions<SmtpOptions> smtpOptions,
-    IEmailSender emailSender) : BackgroundService
+    IEmailSender emailSender,
+    SentMessageIdStore sentMessageIds) : BackgroundService
 {
     private const string AttemptHeader = "x-attempt";
 
-    /// <summary>Docker healthcheck provjerava da je ovaj fajl svjež (consumer je povezan na broker).</summary>
+    /// <summary>Docker healthcheck provjerava da je ovaj fajl svjež (consumer je stvarno registrovan kod brokera).</summary>
     private static readonly string HealthFile = Path.Combine(Path.GetTempPath(), "gobeyond-consumer.alive");
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -50,15 +54,37 @@ public sealed class Worker(
                 await channel.QueueDeclareAsync(settings.DeadLetterQueue, durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
                 await channel.BasicQosAsync(0, 1, false, stoppingToken);
 
+                // Broker koji obriše queue (ili na drugi način otkaže ovog consumer-a) šalje basic.cancel: konekcija
+                // i kanal ostaju IsOpen (nema greške), samo consumer prestaje da prima isporuke (BG-02d). To se
+                // prati preko UnregisteredAsync/ShutdownAsync (ne pollingom IsRunning - odmah nakon BasicConsumeAsync
+                // bi to moglo kratko biti false dok potvrda registracije ne stigne, pa bi polling lažno okinuo
+                // reconnect u petlji); kad se okine bilo koji od njih, unutrašnja petlja ispod se prekida, `await
+                // using` zatvara staru konekciju/kanal, a vanjska petlja se odmah ponovo poveže i re-deklariše queue.
+                var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var consumer = new AsyncEventingBasicConsumer(channel);
                 consumer.ReceivedAsync += (_, delivery) => HandleAsync(channel, delivery, settings, stoppingToken);
+                consumer.UnregisteredAsync += (_, _) =>
+                {
+                    logger.LogWarning("Consumer was cancelled by the broker (e.g. the queue was deleted); reconnecting.");
+                    cancelled.TrySetResult();
+                    return Task.CompletedTask;
+                };
+                consumer.ShutdownAsync += (_, args) =>
+                {
+                    logger.LogWarning("Consumer channel shut down ({ReplyText}); reconnecting.", args.ReplyText);
+                    cancelled.TrySetResult();
+                    return Task.CompletedTask;
+                };
                 await channel.BasicConsumeAsync(settings.Queue, autoAck: false, consumer, stoppingToken);
                 logger.LogInformation("Listening on queue {Queue} (dead-letter: {DeadLetterQueue}).", settings.Queue, settings.DeadLetterQueue);
 
-                while (connection.IsOpen && channel.IsOpen && !stoppingToken.IsCancellationRequested)
+                while (ShouldKeepConsuming(connection.IsOpen, channel.IsOpen, cancelled.Task.IsCompleted, stoppingToken))
                 {
+                    // Fajl se piše SAMO dok je consumer stvarno registrovan (petlja gore) - u BG-02d je prije ovog
+                    // fajl ostajao svjež i kad je broker otkazao consumer-a, pa je docker healthcheck lažno
+                    // prijavljivao "healthy" dok je pošta stajala neisporučena.
                     await File.WriteAllTextAsync(HealthFile, DateTime.UtcNow.ToString("O"), stoppingToken);
-                    await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+                    await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(15), stoppingToken), cancelled.Task);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -80,6 +106,15 @@ public sealed class Worker(
         }
     }
 
+    /// <summary>
+    /// True dok treba nastaviti konzumirati sa trenutnom konekcijom/kanalom: oboje moraju biti otvoreni, consumer
+    /// ne smije biti otkazan od strane brokera (<paramref name="consumerCancelled"/>, vidi komentar u
+    /// <see cref="ExecuteAsync"/>) i servis ne smije biti u gašenju. Izdvojeno kao čista funkcija radi testiranja
+    /// bez pravog RabbitMQ kanala (prije BG-02d fix-a ovaj uslov nije uzimao u obzir otkazivanje consumer-a).
+    /// </summary>
+    public static bool ShouldKeepConsuming(bool connectionOpen, bool channelOpen, bool consumerCancelled, CancellationToken stoppingToken) =>
+        connectionOpen && channelOpen && !consumerCancelled && !stoppingToken.IsCancellationRequested;
+
     private async Task HandleAsync(IChannel channel, BasicDeliverEventArgs delivery, RabbitMqOptions settings, CancellationToken stoppingToken)
     {
         var attempt = ReadAttempt(delivery.BasicProperties) + 1;
@@ -93,7 +128,7 @@ public sealed class Worker(
             message = null;
         }
 
-        if (message is null || string.IsNullOrWhiteSpace(message.RecipientEmail))
+        if (!NotificationMessageValidator.IsValid(message))
         {
             logger.LogError("Invalid notification payload moved to dead-letter queue.");
             await PublishAsync(channel, settings.DeadLetterQueue, delivery, attempt, stoppingToken);
@@ -111,9 +146,20 @@ public sealed class Worker(
             return;
         }
 
+        if (sentMessageIds.WasSent(message.MessageId))
+        {
+            // Redelivery nakon pada procesa između uspješnog SMTP slanja i BasicAck-a (vidi SentMessageIdStore) -
+            // email je stvarno već poslan, samo se potvrđuje bez ponovnog slanja (BG-06).
+            logger.LogInformation("Email {MessageId} ({EventType}) already sent earlier (redelivered by the broker); acking without resending.",
+                message.MessageId, message.EventType);
+            await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
+            return;
+        }
+
         try
         {
             await emailSender.SendAsync(message.RecipientEmail, message.Subject, message.Body, stoppingToken);
+            sentMessageIds.MarkSent(message.MessageId);
             await channel.BasicAckAsync(delivery.DeliveryTag, false, stoppingToken);
             logger.LogInformation("Email {MessageId} ({EventType}) sent to {Recipient}.", message.MessageId, message.EventType, message.RecipientEmail);
         }

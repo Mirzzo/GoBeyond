@@ -94,7 +94,7 @@ Za stvarnu dostavu preko Gmail-a:
    Gmail zahtijeva da `From` bude tačno prijavljeni nalog (`Smtp__Username`), inače ga sam prepiše.
 3. Ponovo podignite servis koji šalje email: `docker compose up -d --build` (rekreira `email-consumer`; `docker-compose.yml` koristi Mailpit samo kao podrazumijevanu vrijednost `${Smtp__Host:-mailpit}` / `${Smtp__Port:-1025}`, pa postavke iz `.env` pobjeđuju).
 
-**Zaštita seed/demo adresa (`Smtp:SuppressedRecipientDomains`, podrazumijevano `["gobeyond.ba"]` u `appsettings.Shared.json`):** kad SMTP host **nije** Mailpit, `GoBeyond.EmailConsumer` NE šalje email primaocima na navedenim domenama (seed korisnici imaju `{username}@gobeyond.ba`, koja može biti tuđa, stvarna domena) — poruka se samo loguje ("suppressed") i potvrđuje (ack) bez pokušaja slanja i bez dead-lettera. Kad je host Mailpit, supresija se ne primjenjuje jer email ionako ostaje lokalno, pa je korisno vidjeti svu demo poštu (registracija, obavijesti, poruke) seed korisnika u Mailpit sučelju.
+**Zaštita seed/demo adresa (`Smtp:SuppressedRecipientDomains`, podrazumijevano `["gobeyond.ba"]` u `appsettings.Shared.json`):** kad SMTP host **nije** Mailpit, `GoBeyond.EmailConsumer` NE šalje email primaocima na navedenim domenama ili njihovim poddomenama (seed korisnici imaju `{username}@gobeyond.ba`, koja može biti tuđa, stvarna domena; poddomena kao `edu.gobeyond.ba` je i dalje ista treća strana, pa se i njoj potiskuje slanje) — poruka se samo loguje ("suppressed") i potvrđuje (ack) bez pokušaja slanja i bez dead-lettera. Kad je host Mailpit, supresija se ne primjenjuje jer email ionako ostaje lokalno, pa je korisno vidjeti svu demo poštu (registracija, obavijesti, poruke) seed korisnika u Mailpit sučelju.
 
 ### 3. Desktop aplikacija (Windows)
 
@@ -140,7 +140,7 @@ UI/
 docs/api-contract.md       API ugovor između backenda i klijentskih aplikacija
 ```
 
-- **Mikroservisi / RabbitMQ.** API domensku promjenu i email poruku upisuje u istoj transakciji (outbox tabela). `OutboxDispatcher` poruke objavljuje na queue `gobeyond.notifications`. `GoBeyond.EmailConsumer` ih konzumira i šalje email preko SMTP-a (Mailpit podrazumijevano, opcionalno Gmail — vidi [Email](#2a-email-mailpit-podrazumijevano-opcionalno-gmail)). Primaoci na zaštićenim domenama (`Smtp:SuppressedRecipientDomains`) se preskaču kad host nije Mailpit. Nakon 5 neuspjelih pokušaja poruka ide u `gobeyond.notifications.dead`.
+- **Mikroservisi / RabbitMQ.** API domensku promjenu i email poruku upisuje u istoj transakciji (outbox tabela). `OutboxDispatcher` poruke objavljuje na queue `gobeyond.notifications`. `GoBeyond.EmailConsumer` ih konzumira i šalje email preko SMTP-a (Mailpit podrazumijevano, opcionalno Gmail — vidi [Email](#2a-email-mailpit-podrazumijevano-opcionalno-gmail)). Primaoci na zaštićenim domenama i njihovim poddomenama (`Smtp:SuppressedRecipientDomains`) se preskaču kad host nije Mailpit. Nakon 5 neuspjelih pokušaja ili za poruku bez obaveznih polja (npr. bez naslova/tijela) ide u `gobeyond.notifications.dead`, nikad kao prazan email. Ako broker otkaže consumer-a (npr. obrisan queue), consumer se sam ponovo poveže i re-deklariše queue umjesto da tiho stane. Poruka koju broker isporuči dvaput nakon pada procesa (redelivery) se prepoznaje po Id-u (fajl na `Smtp:SentMessageIdsFilePath`) i samo potvrđuje, bez ponovnog slanja.
 - **Automatske obavijesti.** `SubscriptionLifecycleService` periodično:
   - označava istekle pretplate,
   - šalje podsjetnik pred istek,
