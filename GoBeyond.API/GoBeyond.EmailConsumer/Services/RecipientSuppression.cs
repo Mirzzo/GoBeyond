@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Mail;
+using System.Text;
 
 namespace GoBeyond.EmailConsumer.Services;
 
@@ -22,13 +23,10 @@ public static class RecipientSuppression
         !string.IsNullOrWhiteSpace(host) && MailpitHosts.Contains(host.Trim(), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Domena primaoca, ili null ako adresa nema domenu. Parsira preko <see cref="MailAddress"/> - isti parser
-    /// koji <see cref="SmtpEmailSender"/> stvarno koristi za slanje - da bi supresija gledala tačno onu domenu
-    /// na koju bi email stvarno otišao, ne sirovi queue string (oblici koje MailAddress normalizuje, npr.
-    /// "x@gobeyond.ba." ili "&lt;x@gobeyond.ba&gt;", inače bi prošli mimo supresije). Domena se dodatno
-    /// propušta kroz <see cref="IdnMapping.GetAscii"/> - istu konverziju koju SmtpClient radi nad hostom prije
-    /// slanja - da bi Unicode oblici koje ta konverzija svodi na zaštićenu domenu (fullwidth slova, ideografska
-    /// tačka, zero-width razmak) bili prepoznati kao ista domena.
+    /// Domena primaoca onakva kakvu bi SmtpClient stvarno poslao, ili null ako adresa nema domenu. Parsira preko
+    /// <see cref="MailAddress"/> (isti parser kao <see cref="SmtpEmailSender"/>), pa oblici poput "x@gobeyond.ba."
+    /// ili "&lt;x@gobeyond.ba&gt;" daju istu domenu kao "x@gobeyond.ba"; Unicode varijante (fullwidth slova,
+    /// ideografska tačka, zero-width razmak) se svode na ASCII oblik - vidi <see cref="NormalizeHost"/>.
     /// </summary>
     public static string? ExtractDomain(string? email)
     {
@@ -42,20 +40,28 @@ public static class RecipientSuppression
         return at >= 0 && at < email.Length - 1 ? NormalizeHost(email[(at + 1)..]) : null;
     }
 
+    /// <summary>
+    /// Host u obliku koji SmtpClient stavlja na žicu: ne-ASCII host prolazi kroz <see cref="IdnMapping.GetAscii"/>
+    /// (kao u <see cref="MailAddress"/>), a završna tačka se skida tek POSLIJE toga, jer konverzija i Unicode
+    /// tačke (U+3002, U+FF0E, U+FF61) ili "." sa ignorisanim znakom iza (U+200B) pretvara u završnu ASCII tačku.
+    /// </summary>
     private static string? NormalizeHost(string host)
     {
-        var trimmed = host.Trim().TrimEnd('.');
-        if (trimmed.Length == 0) return null;
-        try
+        var ascii = host.Trim();
+        if (!Ascii.IsValid(ascii))
         {
-            return Idn.GetAscii(trimmed);
+            try
+            {
+                ascii = Idn.GetAscii(ascii);
+            }
+            catch (ArgumentException)
+            {
+                // Takav host odbija i SmtpClient (email ne ode); poredi se sirovi oblik.
+            }
         }
-        catch (ArgumentException)
-        {
-            // Host koji IdnMapping odbija (npr. prekratak/predugačak label) - koristi kako jeste, ista
-            // domena koju bi u tom slučaju vidio i sam SmtpClient.
-            return trimmed;
-        }
+
+        ascii = ascii.TrimEnd('.');
+        return ascii.Length == 0 ? null : ascii;
     }
 
     /// <summary>
@@ -74,8 +80,8 @@ public static class RecipientSuppression
 
         foreach (var suppressed in suppressedDomains)
         {
-            var configured = suppressed.Trim().TrimEnd('.');
-            if (configured.Length == 0) continue;
+            var configured = NormalizeHost(suppressed);
+            if (configured is null) continue;
             if (string.Equals(configured, domain, StringComparison.OrdinalIgnoreCase)) return true;
             if (domain.EndsWith("." + configured, StringComparison.OrdinalIgnoreCase)) return true;
         }

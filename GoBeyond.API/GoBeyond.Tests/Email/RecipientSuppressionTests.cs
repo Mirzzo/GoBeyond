@@ -75,6 +75,17 @@ public class RecipientSuppressionTests
         Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
     }
 
+    // IdnMapping turns each of these endings into a trailing ASCII '.', so SmtpClient sends RCPT TO:<x@gobeyond.ba.>.
+    [Theory]
+    [InlineData("x@gobeyond.ba。")] // trailing ideographic full stop (U+3002)
+    [InlineData("x@edu.gobeyond.ba．")] // trailing fullwidth full stop (U+FF0E), subdomain
+    [InlineData("x@gobeyond.ba｡")] // trailing halfwidth ideographic full stop (U+FF61)
+    [InlineData("x@gobeyond.ba.​")] // trailing '.' followed by a zero-width space (U+200B)
+    public void ShouldSuppress_SuppressesATrailingUnicodeFullStop_WhenHostIsRealSmtp(string recipient)
+    {
+        Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
+    }
+
     [Fact]
     public void ExtractDomain_ConvertsFullwidthLetterToAscii()
     {
@@ -91,6 +102,30 @@ public class RecipientSuppressionTests
     public void ExtractDomain_TrimsTrailingDot()
     {
         Assert.Equal("gobeyond.ba", RecipientSuppression.ExtractDomain("x@gobeyond.ba."));
+    }
+
+    [Fact]
+    public void ExtractDomain_TrimsATrailingIdeographicFullStop()
+    {
+        Assert.Equal("gobeyond.ba", RecipientSuppression.ExtractDomain("x@gobeyond.ba。"));
+    }
+
+    [Fact]
+    public void ExtractDomain_TrimsATrailingDotFollowedByAZeroWidthSpace()
+    {
+        Assert.Equal("gobeyond.ba", RecipientSuppression.ExtractDomain("x@gobeyond.ba.​"));
+    }
+
+    [Theory]
+    [InlineData("x@školica.ba")]
+    [InlineData("x@edu.školica.ba")]
+    public void ShouldSuppress_ComparesAConfiguredUnicodeDomainInItsAsciiForm(string recipient)
+    {
+        string[] configured = ["školica.ba"];
+        var punycodeRecipient = "x@" + new System.Globalization.IdnMapping().GetAscii(recipient[2..]);
+
+        Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, configured));
+        Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", punycodeRecipient, configured));
     }
 
     [Fact]
