@@ -84,7 +84,7 @@ public sealed class RecommendationService(GoBeyondDbContext db, IMentorCatalogSe
         return similar.Where(x => summaries.ContainsKey(x.MentorProfileId)).Select(x => summaries[x.MentorProfileId]).ToList();
     }
 
-    /// <summary>Čitljiva objašnjenja preporuke (na bosanskom), od najjačeg razloga.</summary>
+    /// <summary>Čitljiva objašnjenja preporuke (na bosanskom, rodno neutralna), od najjačeg razloga.</summary>
     private static List<string> BuildReasons(RecommendationScore score, RecommenderContext context, ClientFeatures client,
         string? preferredTypeName, string goalName)
     {
@@ -98,7 +98,7 @@ public sealed class RecommendationService(GoBeyondDbContext db, IMentorCatalogSe
             reasons.Add($"Vrsta treninga s kojom ste već radili: {typeName}");
 
         if (mentor.SpecializationGoalIds.Contains(client.FitnessGoalId))
-            reasons.Add($"Specijalizovan za: {goalName}");
+            reasons.Add($"Specijalizacija: {goalName}");
 
         if (mentor.SuccessfulClientGoalCounts.TryGetValue(client.FitnessGoalId, out var successCount) && successCount > 0)
             reasons.Add($"Uspješne saradnje s klijentima istog cilja ({successCount})");
@@ -107,11 +107,11 @@ public sealed class RecommendationService(GoBeyondDbContext db, IMentorCatalogSe
             reasons.Add($"Visoka ocjena klijenata ({mentor.AverageRating.ToString("0.0", CultureInfo.InvariantCulture)})");
 
         if (mentor.YearsOfExperience >= 5)
-            reasons.Add($"Iskusan mentor ({mentor.YearsOfExperience} godina iskustva)");
+            reasons.Add($"{DomainTexts.Years(mentor.YearsOfExperience)} iskustva");
 
         if (score.MostSimilarPastMentorId is { } pastId && score.MostSimilarPastMentorSimilarity >= StrongSimilarity &&
             context.MentorNames.TryGetValue(pastId, out var pastName))
-            reasons.Add($"Sličan mentoru s kojim ste uspješno sarađivali: {pastName}");
+            reasons.Add($"Profil sličan mentoru s kojim ste uspješno sarađivali: {pastName}");
 
         if (reasons.Count == 0) reasons.Add("Dobro se uklapa u vaš profil i ciljeve");
         return reasons.Take(4).ToList();

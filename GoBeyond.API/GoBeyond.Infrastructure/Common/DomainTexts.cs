@@ -65,6 +65,10 @@ public static class DomainTexts
         return TimeZoneInfo.ConvertTimeFromUtc(utc, PlatformTimeZone(timeZoneId)).ToString("dd.MM.yyyy.", CultureInfo.InvariantCulture);
     }
 
+    /// <summary>Broj godina sa ispravnim oblikom: "1 godina", "2 godine", "5 godina", "21 godina", "22 godine", "112 godina".</summary>
+    public static string Years(int count) =>
+        $"{count} {(count % 10 is >= 2 and <= 4 && count % 100 is < 12 or > 14 ? "godine" : "godina")}";
+
     /// <summary>Slobodan tekst (npr. razlog koji je upisao mentor) kao rečenica: dodaje tačku ako ne završava sa ".", "!" ili "?".</summary>
     public static string Sentence(string text)
     {
