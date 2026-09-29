@@ -35,8 +35,10 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
         message.To.Add(to);
         message.Headers.Add("Message-ID", NewMessageId(from.Host));
 
-        var plainView = AlternateView.CreateAlternateViewFromString(body, Encoding.UTF8, MediaTypeNames.Text.Plain);
-        plainView.TransferEncoding = TransferEncoding.QuotedPrintable;
+        // Base64, ne quoted-printable: .NET-ov QP enkoder svaki CRLF piše kao "=0D=0A" (nikad kao pravi prijelom
+        // reda), pa bi cijeli tekst bio jedan QP red. Base64 prenosi tekst sa CRLF prijelomima bez izmjene.
+        var plainView = AlternateView.CreateAlternateViewFromString(NormalizeLineBreaks(body, "\r\n"), Encoding.UTF8, MediaTypeNames.Text.Plain);
+        plainView.TransferEncoding = TransferEncoding.Base64;
         message.AlternateViews.Add(plainView);
 
         var htmlView = AlternateView.CreateAlternateViewFromString(BuildHtml(body, settings.FromName), Encoding.UTF8, MediaTypeNames.Text.Html);
@@ -48,6 +50,10 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
 
     /// <summary>Message-ID sa domenom pošiljaoca, umjesto da SmtpClient sam smisli jednu.</summary>
     private static string NewMessageId(string fromDomain) => $"<{Guid.NewGuid():N}@{fromDomain}>";
+
+    /// <summary>Svodi svaki prijelom reda (CRLF, LF ili CR) na <paramref name="lineBreak"/>.</summary>
+    private static string NormalizeLineBreaks(string text, string lineBreak) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", lineBreak);
 
     /// <summary>
     /// Pretvara običan tekst poruke u minimalan, siguran HTML: paragrafi po praznom redu (isti razmak koji
@@ -63,7 +69,7 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
             .Append(WebUtility.HtmlEncode(fromName))
             .Append("</p>");
 
-        var normalized = body.Replace("\r\n", "\n").Replace('\r', '\n');
+        var normalized = NormalizeLineBreaks(body, "\n");
         foreach (var paragraph in normalized.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
         {
             var lines = paragraph.Split('\n').Select(WebUtility.HtmlEncode);

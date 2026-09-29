@@ -96,7 +96,7 @@ Za stvarnu dostavu preko Gmail-a:
 
 **Zaštita seed/demo adresa (`Smtp:SuppressedRecipientDomains`, podrazumijevano `["gobeyond.ba"]` u `appsettings.Shared.json`):** kad SMTP host **nije** Mailpit, `GoBeyond.EmailConsumer` NE šalje email primaocima na navedenim domenama ili njihovim poddomenama (seed korisnici imaju `{username}@gobeyond.ba`, koja može biti tuđa, stvarna domena; poddomena kao `edu.gobeyond.ba` je i dalje ista treća strana, pa se i njoj potiskuje slanje) — poruka se samo loguje ("suppressed") i potvrđuje (ack) bez pokušaja slanja i bez dead-lettera. Kad je host Mailpit, supresija se ne primjenjuje jer email ionako ostaje lokalno, pa je korisno vidjeti svu demo poštu (registracija, obavijesti, poruke) seed korisnika u Mailpit sučelju.
 
-**Format poruke:** svaki email se šalje kao `multipart/alternative` (text/plain + jednostavan HTML dio, oba UTF-8/quoted-printable), sa `Message-ID` na domeni pošiljaoca — bez linkova i slika — da bi Gmail i slični filteri manje sumnjičili poruku kao spam.
+**Format poruke:** svaki email se šalje kao `multipart/alternative` (text/plain kao UTF-8/base64 sa CRLF prijelomima reda + jednostavan HTML dio kao UTF-8/quoted-printable), sa `Message-ID` na domeni pošiljaoca — bez linkova i slika — da bi Gmail i slični filteri manje sumnjičili poruku kao spam.
 
 ### 3. Desktop aplikacija (Windows)
 
