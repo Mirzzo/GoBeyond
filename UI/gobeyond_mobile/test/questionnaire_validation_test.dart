@@ -30,6 +30,25 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
   }
 
+  testWidgets('every question addresses the client formally ("Vi")',
+      (tester) async {
+    await useTallSurface(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.theme,
+        home: QuestionnaireScreen(mentor: _mentor()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Koliko često se bavite fizičkom aktivnošću van treninga '
+          '(šetnje, sportovi, rekreacija)?'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('baviš'), findsNothing);
+  });
+
   testWidgets(
       'KUPI PLAN questionnaire rejects answers shorter than 2 characters and blocks navigation',
       (tester) async {
