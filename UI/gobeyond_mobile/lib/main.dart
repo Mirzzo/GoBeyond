@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/auth/auth_controller.dart';
 import 'core/auth/auth_scope.dart';
@@ -50,6 +51,13 @@ class _GoBeyondAppState extends State<GoBeyondApp> with WidgetsBindingObserver {
         debugShowCheckedModeBanner: false,
         navigatorKey: AppNavigator.key,
         theme: AppTheme.theme,
+        locale: const Locale('bs'),
+        supportedLocales: const [Locale('bs')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
         home: const _AppBootstrap(),
       ),
     );
