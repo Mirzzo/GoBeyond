@@ -189,9 +189,16 @@ public sealed class AuthService(
     public async Task<MessageResponse> ChangePasswordAsync(int userId, Guid? sessionId, ChangePasswordRequest request,
         CancellationToken cancellationToken = default)
     {
+        // Trenutna lozinka se provjerava nad zaključanim redom (UserSessions): admin reset ili druga promjena lozinke koja je
+        // završila u međuvremenu se vidi, pa se ova promjena odbija umjesto da je pregazi.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockUserAsync(userId, cancellationToken);
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
                    ?? throw new NotFoundException(DomainTexts.UserNotFound);
 
+        // Nalog je blokiran ili obrisan dok je zahtjev čekao: sesije su mu već završene.
+        if (user.IsDeleted || !user.IsActive)
+            throw new UnauthorizedException(SessionExpired);
         if (!passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
             throw new ValidationException("currentPassword", "Trenutna lozinka nije ispravna.");
         if (request.NewPassword == request.CurrentPassword)
@@ -199,7 +206,6 @@ public sealed class AuthService(
 
         // Nova lozinka završava sesije na drugim uređajima. Sesija ovog uređaja ostaje: stari access token dobija 401, a
         // aplikacija ga refresh tokenom zamijeni bez ponovne prijave.
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         await db.EndSessionsAsync(user, sessionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);

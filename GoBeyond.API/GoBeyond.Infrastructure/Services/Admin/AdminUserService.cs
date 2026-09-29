@@ -74,11 +74,13 @@ public sealed class AdminUserService(
             await accountValidator.ValidateClientAsync(errors, request.Client.FitnessLevelId, request.Client.FitnessGoalId,
                 request.Client.PreferredTrainingTypeId, "client.", cancellationToken);
 
-        // Mentorski profil je zaključan do kraja izmjene: pretplata koja se kod ovog mentora upravo otvara (SubscriptionService)
-        // se ili vidi u provjeri ispod, ili se nakon promjene uloge ne otvara.
+        // Zaključava se profil, pa korisnik (UserSessions), istim redoslijedom kao kod izmjene vlastitog profila i odobravanja
+        // mentora, pa nema deadlock-a. Mentorski profil je zaključan do kraja izmjene: pretplata koja se kod ovog mentora upravo
+        // otvara (SubscriptionService) se ili vidi u provjeri ispod, ili se nakon promjene uloge ne otvara. Zaključan korisnik se
+        // ne preplete sa promjenom lozinke, blokiranjem ili brisanjem istog korisnika.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        if (roleChanged && user.MentorProfile is not null)
-            await db.LockMentorProfileAsync(user.MentorProfile.Id, cancellationToken);
+        await LockProfilesAsync(user, cancellationToken);
+        await LockAndRefreshAsync(user, cancellationToken);
         if (roleChanged && await HasOpenCollaborationsAsync(user, cancellationToken))
             errors.Add("role", "Uloga se ne može promijeniti dok korisnik ima aktivne ili započete saradnje. Prvo ih otkažite.");
         errors.ThrowIfAny();
@@ -123,9 +125,8 @@ public sealed class AdminUserService(
 
     public async Task<MessageResponse> ResetPasswordAsync(int id, ResetPasswordRequest request, CancellationToken cancellationToken = default)
     {
-        var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken)
-                   ?? throw new NotFoundException(DomainTexts.UserNotFound);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var user = await LockAndLoadAsync(id, cancellationToken);
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -136,9 +137,8 @@ public sealed class AdminUserService(
     public async Task<AdminUserDto> BlockAsync(int adminUserId, int id, CancellationToken cancellationToken = default)
     {
         if (id == adminUserId) throw new ValidationException("Ne možete blokirati vlastiti nalog.");
-        var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken)
-                   ?? throw new NotFoundException(DomainTexts.UserNotFound);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var user = await LockAndLoadAsync(id, cancellationToken);
         user.IsActive = false;
         await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -148,11 +148,12 @@ public sealed class AdminUserService(
 
     public async Task<AdminUserDto> UnblockAsync(int id, CancellationToken cancellationToken = default)
     {
-        // Obrisan korisnik se ne vraća: IsDeleted filter ga ne pronalazi.
-        var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken)
-                   ?? throw new NotFoundException(DomainTexts.UserNotFound);
+        // Obrisan korisnik se ne vraća: IsDeleted filter ga ne pronalazi, ni kad je obrisan dok je zahtjev čekao na zaključavanje.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var user = await LockAndLoadAsync(id, cancellationToken);
         user.IsActive = true;
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return ProfileMapper.ToAdminUser(user);
     }
 
@@ -164,17 +165,12 @@ public sealed class AdminUserService(
     public async Task DeleteAsync(int adminUserId, int id, CancellationToken cancellationToken = default)
     {
         if (id == adminUserId) throw new ValidationException("Ne možete obrisati vlastiti nalog.");
-        var user = await db.Users
-            .Include(x => x.MentorProfile)
-            .Include(x => x.ClientProfile)
-            .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken)
-                   ?? throw new NotFoundException(DomainTexts.UserNotFound);
-
         var now = DateTime.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         // Otvorene pretplate se zaključavaju (redom po Id-u) prije čitanja, pa istovremeni confirm ili prihvatanje ne može
-        // pregaziti otkazivanje.
+        // pregaziti otkazivanje. Korisnik se zaključava poslije pretplata, istim redoslijedom kao prelazi pretplata (pretplata,
+        // pa korisnik kojem ide obavijest), a prije svojih refresh tokena (UserSessions).
         var subscriptionIds = await db.Subscriptions
             .Where(x => QueryExtensions.OpenStatuses.Contains(x.Status) &&
                         (x.MentorProfile.UserId == id || x.ClientProfile.UserId == id))
@@ -183,6 +179,7 @@ public sealed class AdminUserService(
             .ToListAsync(cancellationToken);
         foreach (var subscriptionId in subscriptionIds)
             await db.LockSubscriptionAsync(subscriptionId, cancellationToken);
+        var user = await LockAndLoadAsync(id, cancellationToken);
 
         var subscriptions = await db.Subscriptions
             .Include(x => x.ClientProfile).ThenInclude(x => x.User)
@@ -207,6 +204,35 @@ public sealed class AdminUserService(
         await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Zaključava korisnika u tekućoj transakciji (UserSessions) i tek onda ga učitava, pa izmjena vidi zadnje stanje (npr.
+    /// brisanje ili promjenu lozinke koja je upravo završila). Obrisan korisnik se ne pronalazi.
+    /// </summary>
+    private async Task<User> LockAndLoadAsync(int id, CancellationToken cancellationToken)
+    {
+        await db.LockUserAsync(id, cancellationToken);
+        return await db.Users.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken)
+               ?? throw new NotFoundException(DomainTexts.UserNotFound);
+    }
+
+    /// <summary>Zaključava postojeće profile korisnika (UPDATE bez promjene) do kraja tekuće transakcije.</summary>
+    private async Task LockProfilesAsync(User user, CancellationToken cancellationToken)
+    {
+        if (user.ClientProfile is not null)
+            await db.ClientProfiles.Where(x => x.Id == user.ClientProfile.Id)
+                .ExecuteUpdateAsync(x => x.SetProperty(c => c.FitnessLevelId, c => c.FitnessLevelId), cancellationToken);
+        if (user.MentorProfile is not null)
+            await db.LockMentorProfileAsync(user.MentorProfile.Id, cancellationToken);
+    }
+
+    /// <summary>Isto za korisnika učitanog prije transakcije (sa profilima): nakon zaključavanja se osvježava iz baze.</summary>
+    private async Task LockAndRefreshAsync(User user, CancellationToken cancellationToken)
+    {
+        await db.LockUserAsync(user.Id, cancellationToken);
+        await db.Entry(user).ReloadAsync(cancellationToken);
+        if (user.IsDeleted) throw new NotFoundException(DomainTexts.UserNotFound);
     }
 
     private async Task<User> LoadAsync(int id, CancellationToken cancellationToken) =>
