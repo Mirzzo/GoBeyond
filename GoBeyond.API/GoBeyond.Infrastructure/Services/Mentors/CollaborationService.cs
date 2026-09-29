@@ -87,15 +87,29 @@ public sealed class CollaborationService(GoBeyondDbContext db, ISubscriptionWork
                                .FirstOrDefaultAsync(x => x.Id == subscriptionId, cancellationToken)
                            ?? throw new NotFoundException(DomainTexts.SubscriptionNotFound);
 
-        await workflow.RejectAsync(subscription, reason.Trim(), DateTime.UtcNow, cancellationToken);
+        var refunds = await workflow.RejectAsync(subscription, reason.Trim(), DateTime.UtcNow, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        var clientName = subscription.ClientProfile.User.FullName;
-        return new MessageResponse(subscription.Payments.Any(x => x.Status == PaymentStatus.Disputed)
-            ? $"Zahtjev klijenta {clientName} je odbijen. Uplata je osporena kod banke klijenta, pa se ne vraća automatski; " +
-              "o povratu odlučuje postupak osporavanja."
-            : $"Zahtjev klijenta {clientName} je odbijen, a uplata je vraćena.");
+        return new MessageResponse(RejectMessage(subscription.ClientProfile.User.FullName, refunds, subscription.Currency));
+    }
+
+    /// <summary>
+    /// Poruka mentoru o odbijanju, sa iznosima koje je upravo ovo odbijanje vratilo, odnosno ostavilo osporenim (isti iznosi
+    /// kao u obavijesti klijentu). Uplata osporena ranije (npr. duplikat) se ovdje ne spominje.
+    /// </summary>
+    private static string RejectMessage(string clientName, RefundOutcome refunds, string currency)
+    {
+        var rejected = $"Zahtjev klijenta {clientName} je odbijen";
+        var refunded = DomainTexts.Money(refunds.Refunded, currency);
+        if (refunds.Disputed == 0)
+            return refunds.Refunded > 0 ? $"{rejected}, a uplaćeni iznos od {refunded} je vraćen." : $"{rejected}.";
+
+        var disputed = DomainTexts.Money(refunds.Disputed, currency);
+        const string notRefunded = "je osporena kod banke klijenta, pa se ne vraća automatski; o povratu odlučuje postupak osporavanja.";
+        return refunds.Refunded > 0
+            ? $"{rejected}. Uplaćeni iznos od {refunded} je vraćen, a uplata od {disputed} {notRefunded}"
+            : $"{rejected}. Uplata od {disputed} {notRefunded}";
     }
 
     public async Task<List<SubscriberDto>> GetSubscribersAsync(int mentorUserId, SubscriptionSearchObject search,

@@ -55,8 +55,8 @@ public sealed class DisputedRefundTests : IDisposable
 
         var response = await _db.RunAsync(db => _db.Collaboration(db).RejectAsync(_db.MentorUser.Id, id, "Trenutno nemam slobodnih termina"));
 
-        Assert.Equal("Zahtjev klijenta Nađa Škrijelj je odbijen. Uplata je osporena kod banke klijenta, pa se ne vraća " +
-                     "automatski; o povratu odlučuje postupak osporavanja.", response.Message);
+        Assert.Equal("Zahtjev klijenta Nađa Škrijelj je odbijen. Uplata od 29,99 USD je osporena kod banke klijenta, pa se ne " +
+                     "vraća automatski; o povratu odlučuje postupak osporavanja.", response.Message);
         var subscription = await _db.SubscriptionAsync(id);
         Assert.Equal(SubscriptionStatus.Rejected, subscription.Status);
         Assert.Equal(PaymentStatus.Disputed, Assert.Single(subscription.Payments).Status);
@@ -67,6 +67,40 @@ public sealed class DisputedRefundTests : IDisposable
 
         await _db.RunAsync(db => _db.LifecycleProcessor(db).RunAsync(DateTime.UtcNow));
         Assert.Single(_db.Gateway.RefundAttempts);
+    }
+
+    [Fact]
+    public async Task MentorReject_WithARefundedAndADisputedPayment_NamesBothAmountsLikeTheClientNotice()
+    {
+        var id = await _db.AddSubscriptionAsync(SubscriptionStatus.AwaitingMentor);
+        await _db.AddPaymentAsync(id, "pi_disputed", PaymentStatus.Succeeded, "succeeded");
+        await _db.AddPaymentAsync(id, "pi_duplicate", PaymentStatus.RefundPending, "succeeded", amount: 12.50m);
+        _db.Gateway.DisputedCharges.Add("pi_disputed");
+
+        var response = await _db.RunAsync(db => _db.Collaboration(db).RejectAsync(_db.MentorUser.Id, id, "Trenutno nemam slobodnih termina"));
+
+        Assert.Equal("Zahtjev klijenta Nađa Škrijelj je odbijen. Uplaćeni iznos od 12,50 USD je vraćen, a uplata od 29,99 USD je " +
+                     "osporena kod banke klijenta, pa se ne vraća automatski; o povratu odlučuje postupak osporavanja.", response.Message);
+        var client = Assert.Single(await _db.NotificationsAsync(_db.ClientUser.Id));
+        Assert.Equal("Vaš zahtjev za saradnju sa mentorom Selma Delić je odbijen. Razlog: Trenutno nemam slobodnih termina. " +
+                     "Uplaćeni iznos od 12,50 USD biće vraćen na vašu karticu. " + DisputedSentence, client.Body);
+    }
+
+    // A duplicate disputed earlier (as an unapplied payment) is not part of this reject: the reject refunded the paid request.
+    [Fact]
+    public async Task MentorReject_WhenOnlyAnEarlierDuplicateIsDisputed_SaysThePaymentWasRefunded()
+    {
+        var id = await _db.AddSubscriptionAsync(SubscriptionStatus.AwaitingMentor);
+        await _db.AddPaymentAsync(id, "pi_paid", PaymentStatus.Succeeded, "succeeded");
+        await _db.AddPaymentAsync(id, "pi_earlier_dispute", PaymentStatus.Disputed, "succeeded", amount: 12.50m);
+
+        var response = await _db.RunAsync(db => _db.Collaboration(db).RejectAsync(_db.MentorUser.Id, id, "Trenutno nemam slobodnih termina"));
+
+        Assert.Equal("Zahtjev klijenta Nađa Škrijelj je odbijen, a uplaćeni iznos od 29,99 USD je vraćen.", response.Message);
+        Assert.Equal([("pi_paid", "refund:pi_paid")], _db.Gateway.Refunds);
+        var client = Assert.Single(await _db.NotificationsAsync(_db.ClientUser.Id));
+        Assert.Equal("Vaš zahtjev za saradnju sa mentorom Selma Delić je odbijen. Razlog: Trenutno nemam slobodnih termina. " +
+                     "Uplaćeni iznos od 29,99 USD biće vraćen na vašu karticu.", client.Body);
     }
 
     [Fact]

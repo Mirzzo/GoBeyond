@@ -25,9 +25,10 @@ public interface ISubscriptionWorkflow
 
     /// <summary>
     /// AwaitingMentor → Rejected uz povrat uplata preko Stripe-a (ako povrat ne uspije, odbijanje se ne izvršava). Osporena
-    /// naplata se ne vraća, nego dobija status Disputed (vidi <see cref="RefundOrFailAsync"/>).
+    /// naplata se ne vraća, nego dobija status Disputed (vidi <see cref="RefundOrFailAsync"/>). Vraća iznose koje je ovo
+    /// odbijanje vratilo, odnosno ostavilo osporenim.
     /// </summary>
-    Task RejectAsync(Subscription subscription, string reason, DateTime now, CancellationToken cancellationToken);
+    Task<RefundOutcome> RejectAsync(Subscription subscription, string reason, DateTime now, CancellationToken cancellationToken);
 
     /// <summary>Samo prelaz u Cancelled i obavijesti, bez povrata; otkazivanje pretplate sa uplatama ide kroz <see cref="CancelAsync"/>.</summary>
     void Cancel(Subscription subscription, string reason, DateTime now, bool notifyClient, bool notifyMentor);
@@ -108,7 +109,7 @@ public sealed class SubscriptionWorkflow(
             sendEmail: true);
     }
 
-    public async Task RejectAsync(Subscription subscription, string reason, DateTime now, CancellationToken cancellationToken)
+    public async Task<RefundOutcome> RejectAsync(Subscription subscription, string reason, DateTime now, CancellationToken cancellationToken)
     {
         if (subscription.Status != SubscriptionStatus.AwaitingMentor)
             throw new ValidationException("Zahtjev se može odbiti samo dok čeka odgovor mentora.");
@@ -123,6 +124,7 @@ public sealed class SubscriptionWorkflow(
             "Zahtjev za saradnju je odbijen",
             $"Vaš zahtjev za saradnju sa mentorom {mentor.FullName} je odbijen. Razlog: {DomainTexts.Sentence(reason)}{RefundSentences(refunds, subscription.Currency)}",
             sendEmail: true);
+        return refunds;
     }
 
     public void Cancel(Subscription subscription, string reason, DateTime now, bool notifyClient, bool notifyMentor)
@@ -318,7 +320,7 @@ public sealed class SubscriptionWorkflow(
     }
 
     private void CancelAndNotify(Subscription subscription, string reason, DateTime now, bool notifyClient, bool notifyMentor,
-        RefundTotals refunds)
+        RefundOutcome refunds)
     {
         // Neplaćenu (PendingPayment) pretplatu mentor nikad nije vidio, pa o njenom prekidu ne dobija obavijest.
         var mentorSawRequest = subscription.Status != SubscriptionStatus.PendingPayment;
@@ -342,10 +344,10 @@ public sealed class SubscriptionWorkflow(
     /// Vraća sve uspješne (i RefundPending) uplate pretplate; rezultat je ukupno vraćeni i ukupno osporeni iznos (za tekst
     /// obavijesti).
     /// </summary>
-    private async Task<RefundTotals> RefundAllAsync(Subscription subscription, DateTime now, string failureMessage,
+    private async Task<RefundOutcome> RefundAllAsync(Subscription subscription, DateTime now, string failureMessage,
         CancellationToken cancellationToken)
     {
-        RefundTotals totals = default;
+        RefundOutcome totals = default;
         foreach (var payment in subscription.Payments.Where(x => RefundableStatuses.Contains(x.Status)).ToList())
         {
             await RefundOrFailAsync(payment, now, failureMessage, cancellationToken);
@@ -420,14 +422,14 @@ public sealed class SubscriptionWorkflow(
     /// <summary>Datum u vremenskoj zoni platforme (Lifecycle:TimeZoneId); završava tačkom, pa rečenica ne dodaje drugu.</summary>
     private string Date(DateTime? value) => DomainTexts.Date(value, lifecycleOptions.Value.TimeZoneId);
 
-    private static string RefundSentences(RefundTotals refunds, string currency) =>
+    private static string RefundSentences(RefundOutcome refunds, string currency) =>
         (refunds.Refunded > 0 ? $" Uplaćeni iznos od {Money(refunds.Refunded, currency)} biće vraćen na vašu karticu." : string.Empty) +
         (refunds.Disputed > 0
             ? $" Uplata od {Money(refunds.Disputed, currency)} je osporena kod vaše banke, pa se ne vraća automatski.{DisputeOutcomeSentence}"
             : string.Empty);
 
     private static string Money(decimal amount, string currency) => DomainTexts.Money(amount, currency);
-
-    /// <summary>Ukupno vraćeni i ukupno osporeni (Disputed) iznos uplata jedne pretplate.</summary>
-    private readonly record struct RefundTotals(decimal Refunded, decimal Disputed);
 }
+
+/// <summary>Ukupno vraćeni i ukupno osporeni (Disputed, nevraćeni) iznos uplata u jednom prelazu pretplate.</summary>
+public readonly record struct RefundOutcome(decimal Refunded, decimal Disputed);
