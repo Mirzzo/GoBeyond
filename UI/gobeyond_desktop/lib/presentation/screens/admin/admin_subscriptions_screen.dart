@@ -9,16 +9,20 @@ import '../../widgets/panel.dart';
 
 const _statusOptions = ['PendingPayment', 'AwaitingMentor', 'Active', 'Rejected', 'Cancelled', 'Expired'];
 
-/// Warning shown in the OTKAŽI confirmation dialog. An AwaitingMentor
-/// subscription was already paid for by the client (create-intent +
-/// confirm) but never accepted by the mentor, so admin cancel refunds it
-/// and the dialog must say so,
-/// the same way mentor reject already warns about the refund.
+/// Warning shown in the OTKAŽI confirmation dialog, matching what admin
+/// cancel does (api-contract.md §5): the client is always notified, the
+/// mentor only when the request reached them. A PendingPayment subscription
+/// was never paid, so the mentor never saw it and gets no notification. An
+/// AwaitingMentor subscription was paid but not yet accepted, so the
+/// client's payment is refunded, the same way mentor reject warns about it.
 String subscriptionCancelWarning({
   required String? status,
   required String clientFullName,
   required String mentorFullName,
 }) {
+  if (status == 'PendingPayment') {
+    return 'Klijent ($clientFullName) dobija obavijest o otkazivanju. Mentor ne dobija obavijest jer zahtjev nije plaćen.';
+  }
   final base = 'Klijent ($clientFullName) i mentor ($mentorFullName) će biti obaviješteni o otkazivanju.';
   if (status == 'AwaitingMentor') {
     return '$base Klijentova uplata će biti vraćena.';
