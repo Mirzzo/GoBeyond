@@ -311,6 +311,8 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Announcement).WithMany(x => x.Notifications)
                 .HasForeignKey(x => x.AnnouncementId).OnDelete(DeleteBehavior.ClientSetNull);
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(x => x.SenderUserId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Announcement>(entity =>

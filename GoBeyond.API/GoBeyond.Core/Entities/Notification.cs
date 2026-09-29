@@ -12,6 +12,12 @@ public class Notification : BaseEntity
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int? AnnouncementId { get; set; }
 
+    /// <summary>
+    /// Pošiljalac poruke za NewMessage obavijest (jedna nepročitana po pošiljaocu). Null za ostale tipove i za NewMessage
+    /// obavijesti nastale prije ove kolone, koje se prepoznaju po imenu u naslovu.
+    /// </summary>
+    public int? SenderUserId { get; set; }
+
     public User User { get; set; } = null!;
     public Announcement? Announcement { get; set; }
 }

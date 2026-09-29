@@ -13,6 +13,7 @@ namespace GoBeyond.Tests.Messages;
 /// <summary>
 /// NewMessage obavijest: naslov bez padeža ("Nova poruka: {ime}"), jedna nepročitana obavijest po pošiljaocu (i kad je
 /// postojeća u ranijem obliku), a otvaranje niti je označava pročitanom, pa broj nepročitanih obavijesti odgovara porukama.
+/// Pošiljalac se prepoznaje po Id-u, pa se obavijesti dvije osobe sa istim imenom i prezimenom ne spajaju.
 /// </summary>
 public sealed class NewMessageNotificationTests : IDisposable
 {
@@ -82,6 +83,33 @@ public sealed class NewMessageNotificationTests : IDisposable
 
     private Task<int> UnreadCountAsync(User user) => new NotificationService(_db).GetUnreadCountAsync(user.Id);
 
+    /// <summary>Drugi klijent sa istim imenom i prezimenom kao prvi, sa aktivnom saradnjom kod istog mentora.</summary>
+    private (User Client, Subscription Subscription) AddClientWithTheSameName()
+    {
+        var twin = new User
+        {
+            FirstName = _client.FirstName, LastName = _client.LastName, Username = "tarik.hodzic", Email = "tarik.hodzic@test.ba",
+            DateOfBirth = new DateOnly(1994, 6, 1), GenderId = _client.GenderId, PasswordHash = "x", Role = UserRole.Client
+        };
+        var profile = new ClientProfile
+        {
+            User = twin, WeightKg = 75, HeightCm = 178, FitnessLevelId = _subscription.ClientProfile.FitnessLevelId,
+            FitnessGoalId = _subscription.ClientProfile.FitnessGoalId, TrainingExperienceYears = 2
+        };
+        var subscription = new Subscription
+        {
+            ClientProfile = profile, MentorProfileId = _subscription.MentorProfileId, Status = SubscriptionStatus.Active, Price = 20,
+            Currency = "usd", PaidAt = DateTime.UtcNow.AddDays(-3), AcceptedAt = DateTime.UtcNow.AddDays(-3),
+            StartDate = DateTime.UtcNow.AddDays(-3), EndDate = DateTime.UtcNow.AddDays(27), CreatedAt = DateTime.UtcNow.AddDays(-3)
+        };
+        _db.AddRange(profile, subscription);
+        _db.SaveChanges();
+        return (twin, subscription);
+    }
+
+    private Task<MessageDto> ClientSendsAsync(User client, Subscription subscription, string content) =>
+        _service.SendAsync(client.Id, UserRole.Client, subscription.Id, new SendMessageRequest { Content = content });
+
     [Fact]
     public async Task SendAsync_TitleNamesTheSenderWithoutDecliningTheName()
     {
@@ -91,6 +119,7 @@ public sealed class NewMessageNotificationTests : IDisposable
         Assert.Equal(NotificationType.NewMessage, notification.Type);
         Assert.Equal("Nova poruka: Haris Mehmedović", notification.Title);
         Assert.Equal("Pozdrav, plan stiže danas.", notification.Body);
+        Assert.Equal(_mentor.Id, notification.SenderUserId);
         Assert.False(notification.IsRead);
     }
 
@@ -106,6 +135,7 @@ public sealed class NewMessageNotificationTests : IDisposable
     }
 
     [Theory]
+    [InlineData("Nova poruka: Haris Mehmedović", "Stara poruka")] // bez Id-a pošiljaoca (nastala prije te kolone)
     [InlineData("Nova poruka od Haris Mehmedović", "Stara poruka")]
     [InlineData("Nova poruka", "Haris Mehmedović: Stara poruka")]
     public async Task SendAsync_WithAnUnreadNotificationInAnEarlierFormat_UpdatesItInsteadOfAddingAnother(string title, string body)
@@ -118,6 +148,7 @@ public sealed class NewMessageNotificationTests : IDisposable
         Assert.False(notification.IsRead);
         Assert.Equal("Nova poruka: Haris Mehmedović", notification.Title);
         Assert.Equal("Nova poruka o planu", notification.Body);
+        Assert.Equal(_mentor.Id, notification.SenderUserId);
     }
 
     [Fact]
@@ -158,6 +189,7 @@ public sealed class NewMessageNotificationTests : IDisposable
     }
 
     [Theory]
+    [InlineData("Nova poruka: Haris Mehmedović", "Stara poruka")] // bez Id-a pošiljaoca (nastala prije te kolone)
     [InlineData("Nova poruka od Haris Mehmedović", "Stara poruka")]
     [InlineData("Nova poruka", "Haris Mehmedović: Stara poruka")]
     public async Task GetThreadAsync_MarksAnEarlierFormatNotificationFromTheOtherPartyRead(string title, string body)
@@ -211,5 +243,37 @@ public sealed class NewMessageNotificationTests : IDisposable
 
         await _service.GetThreadAsync(_client.Id, UserRole.Client, _subscription.Id);
         Assert.Equal(0, await UnreadCountAsync(_client));
+    }
+
+    [Fact]
+    public async Task SendAsync_FromTwoClientsWithTheSameName_KeepsOneNotificationPerSender()
+    {
+        var (twin, twinSubscription) = AddClientWithTheSameName();
+
+        await ClientSendsAsync(twin, twinSubscription, "Poruka druge osobe istog imena.");
+        await ClientSendsAsync(_client, _subscription, "Poruka prve osobe.");
+
+        var notifications = await NotificationsOfAsync(_mentor);
+        Assert.Equal([((int?)twin.Id, "Poruka druge osobe istog imena."), (_client.Id, "Poruka prve osobe.")],
+            notifications.Select(x => (x.SenderUserId, x.Body)));
+        Assert.All(notifications, x => Assert.Equal(("Nova poruka: Tarik Hodžić", false), (x.Title, x.IsRead)));
+    }
+
+    [Fact]
+    public async Task GetThreadAsync_LeavesTheNotificationOfAnotherSenderWithTheSameNameUnread()
+    {
+        var (twin, twinSubscription) = AddClientWithTheSameName();
+        await ClientSendsAsync(twin, twinSubscription, "Poruka druge osobe istog imena.");
+        await ClientSendsAsync(_client, _subscription, "Poruka prve osobe.");
+        Assert.Equal(2, await UnreadCountAsync(_mentor));
+
+        await _service.GetThreadAsync(_mentor.Id, UserRole.Mentor, _subscription.Id);
+
+        var unread = Assert.Single(await NotificationsOfAsync(_mentor), x => !x.IsRead);
+        Assert.Equal(((int?)twin.Id, "Poruka druge osobe istog imena."), (unread.SenderUserId, unread.Body));
+        Assert.Equal(1, await UnreadCountAsync(_mentor));
+
+        await _service.GetThreadAsync(_mentor.Id, UserRole.Mentor, twinSubscription.Id);
+        Assert.Equal(0, await UnreadCountAsync(_mentor));
     }
 }

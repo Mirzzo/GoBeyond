@@ -132,18 +132,20 @@ public sealed class MessageService(GoBeyondDbContext db, INotificationSender not
         {
             existing.Title = title;
             existing.Body = preview;
+            existing.SenderUserId = sender.Id;
             existing.CreatedAt = DateTime.UtcNow;
             return;
         }
-        notifications.Notify(recipient, NotificationType.NewMessage, title, preview, sendEmail: false);
+        notifications.Notify(recipient, NotificationType.NewMessage, title, preview, sendEmail: false).SenderUserId = sender.Id;
     }
 
     /// <summary>Naslov NewMessage obavijesti; ime ide iza dvotačke jer se ne može automatski staviti u padež ("od Harisa ...").</summary>
     private static string NewMessageTitle(User sender) => $"Nova poruka: {sender.FullName}";
 
     /// <summary>
-    /// Nepročitane NewMessage obavijesti korisnika od pošiljaoca, uključujući ranije oblike: naslov "Nova poruka od {ime}"
-    /// i naslov "Nova poruka" sa tekstom "{ime}: ..." (demo podaci).
+    /// Nepročitane NewMessage obavijesti korisnika od pošiljaoca. Pošiljalac se prepoznaje po Id-u, pa se obavijesti dvije
+    /// osobe sa istim imenom ne spajaju. Obavijesti bez Id-a pošiljaoca (nastale prije te kolone) prepoznaju se po imenu:
+    /// naslov "Nova poruka: {ime}", "Nova poruka od {ime}" ili "Nova poruka" sa tekstom "{ime}: ..." (demo podaci).
     /// </summary>
     private IQueryable<Notification> UnreadNewMessageNotifications(int userId, User sender)
     {
@@ -151,8 +153,10 @@ public sealed class MessageService(GoBeyondDbContext db, INotificationSender not
         var legacyTitle = $"Nova poruka od {sender.FullName}";
         var legacyBodyPrefix = $"{sender.FullName}: ";
         return db.Notifications.Where(x => x.UserId == userId && x.Type == NotificationType.NewMessage && !x.IsRead &&
-                                           (x.Title == title || x.Title == legacyTitle ||
-                                            (x.Title == "Nova poruka" && x.Body.StartsWith(legacyBodyPrefix))));
+                                           (x.SenderUserId == sender.Id ||
+                                            (x.SenderUserId == null &&
+                                             (x.Title == title || x.Title == legacyTitle ||
+                                              (x.Title == "Nova poruka" && x.Body.StartsWith(legacyBodyPrefix))))));
     }
 
     private static bool CanSend(SubscriptionStatus status) =>

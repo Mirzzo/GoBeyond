@@ -104,7 +104,7 @@ public sealed partial class DatabaseSeeder
     {
         var preview = message.Content.Length <= 120 ? message.Content : message.Content[..117].TrimEnd() + "...";
         Notify(recipient, NotificationType.NewMessage, "Nova poruka",
-            $"{message.SenderUser.FullName}: {preview}", message.SentAt, isRead);
+            $"{message.SenderUser.FullName}: {preview}", message.SentAt, isRead).SenderUserId = message.SenderUserId;
     }
 
     // ---------------------------------------------------------------- obavijesti
@@ -186,10 +186,10 @@ public sealed partial class DatabaseSeeder
             payment.PaidAt ?? payment.CreatedAt, isRead);
     }
 
-    private void Notify(User user, NotificationType type, string title, string body, DateTime createdAt, bool isRead,
+    private Notification Notify(User user, NotificationType type, string title, string body, DateTime createdAt, bool isRead,
         Announcement? announcement = null)
     {
-        db.Notifications.Add(new Notification
+        var notification = new Notification
         {
             UserId = user.Id,
             Title = title,
@@ -198,7 +198,9 @@ public sealed partial class DatabaseSeeder
             IsRead = isRead,
             CreatedAt = createdAt,
             Announcement = announcement
-        });
+        };
+        db.Notifications.Add(notification);
+        return notification;
     }
 
     // ---------------------------------------------------------------- sistemske objave
