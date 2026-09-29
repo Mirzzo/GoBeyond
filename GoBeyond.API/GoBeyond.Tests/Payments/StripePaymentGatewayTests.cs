@@ -47,8 +47,9 @@ public class StripePaymentGatewayTests
     [Fact]
     public async Task Refund_SendsIdempotencyKey()
     {
-        await _gateway.RefundAsync("pi_123", "refund:7", CancellationToken.None);
+        var result = await _gateway.RefundAsync("pi_123", "refund:7", CancellationToken.None);
 
+        Assert.Equal(RefundResult.Refunded, result);
         var request = Assert.Single(_handler.Requests);
         Assert.EndsWith("/v1/refunds", request.Url);
         Assert.Equal("refund:7", request.IdempotencyKey);
@@ -78,9 +79,31 @@ public class StripePaymentGatewayTests
         // Stvarni Stripe odgovor (test mod) za povrat već vraćene naplate sa novim Idempotency-Key-om.
         _handler.Respond(HttpStatusCode.BadRequest, StripeError("invalid_request_error", "charge_already_refunded"));
 
-        await _gateway.RefundAsync("pi_123", "refund:pi_123", CancellationToken.None);
+        var result = await _gateway.RefundAsync("pi_123", "refund:pi_123", CancellationToken.None);
 
+        Assert.Equal(RefundResult.Refunded, result);
         Assert.Single(_handler.Requests);
+    }
+
+    [Fact]
+    public async Task Refund_WhenTheChargeIsDisputed_ReportsItInsteadOfThrowing()
+    {
+        // Stvarni Stripe odgovor (test mod, kartica pm_card_createDispute) za povrat osporene naplate.
+        _handler.Respond(HttpStatusCode.BadRequest, StripeError("invalid_request_error", "charge_disputed"));
+
+        var result = await _gateway.RefundAsync("pi_123", "refund:pi_123", CancellationToken.None);
+
+        Assert.Equal(RefundResult.ChargeDisputed, result);
+        Assert.Single(_handler.Requests);
+    }
+
+    [Fact]
+    public async Task CancelPaymentIntent_DoesNotTolerateChargeDisputed()
+    {
+        _handler.Respond(HttpStatusCode.BadRequest, StripeError("invalid_request_error", "charge_disputed"));
+
+        await Assert.ThrowsAsync<GoBeyond.Core.Exceptions.ValidationException>(() =>
+            _gateway.CancelPaymentIntentAsync("pi_123", "cancel:pi_123", CancellationToken.None));
     }
 
     [Theory]

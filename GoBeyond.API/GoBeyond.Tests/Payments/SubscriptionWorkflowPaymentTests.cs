@@ -133,6 +133,51 @@ public class SubscriptionWorkflowPaymentTests
     }
 
     [Fact]
+    public async Task PaymentThatCannotBeApplied_WhenTheChargeIsDisputed_IsMarkedDisputedInsteadOfRefundPending()
+    {
+        _gateway.DisputedCharges.Add("pi_test_1");
+        var payment = PaymentFor(SubscriptionStatus.Cancelled, PaymentPurpose.Initial);
+
+        await _workflow.ApplySuccessfulPaymentAsync(payment, Now, CancellationToken.None);
+
+        Assert.Equal(PaymentStatus.Disputed, payment.Status);
+        Assert.Null(payment.RefundedAt);
+        Assert.Empty(_gateway.Refunds);
+        var notification = Assert.Single(_notifications.Sent);
+        Assert.Equal((11, NotificationType.PaymentRefunded, "Uplata je osporena", true),
+            (notification.UserId, notification.Type, notification.Title, notification.Email));
+        Assert.EndsWith("Uplata je osporena kod vaše banke, pa se ne vraća automatski. O povratu odlučuje postupak osporavanja.",
+            notification.Body);
+    }
+
+    [Fact]
+    public async Task RetryPendingRefund_WhenTheChargeIsDisputed_StopsRetryingAndTellsTheClientOnce()
+    {
+        _gateway.DisputedCharges.Add("pi_test_1");
+        var payment = PaymentFor(SubscriptionStatus.Cancelled, PaymentPurpose.Initial);
+        payment.Status = PaymentStatus.RefundPending;
+
+        Assert.False(await _workflow.RetryPendingRefundAsync(payment, Now, CancellationToken.None));
+        Assert.False(await _workflow.RetryPendingRefundAsync(payment, Now, CancellationToken.None));
+
+        Assert.Equal(PaymentStatus.Disputed, payment.Status);
+        Assert.Equal(["pi_test_1"], _gateway.RefundAttempts);
+        var notification = Assert.Single(_notifications.Sent);
+        Assert.Equal(("Uplata je osporena", true), (notification.Title, notification.Email));
+    }
+
+    [Fact]
+    public async Task DisputedPayment_IsNotAppliedAgain()
+    {
+        var payment = PaymentFor(SubscriptionStatus.PendingPayment, PaymentPurpose.Initial);
+        payment.Status = PaymentStatus.Disputed;
+
+        Assert.False(await _workflow.ApplySuccessfulPaymentAsync(payment, Now, CancellationToken.None));
+        Assert.Equal(SubscriptionStatus.PendingPayment, payment.Subscription.Status);
+        Assert.Empty(_notifications.Sent);
+    }
+
+    [Fact]
     public void RefundIdempotencyKey_UsesPaymentIntentIdNotDatabaseId()
     {
         // Ista uplata (Id 7) u drugoj bazi ima drugi PaymentIntent - ključ se ne smije ponoviti.

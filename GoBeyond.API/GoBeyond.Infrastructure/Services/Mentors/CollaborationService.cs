@@ -90,7 +90,12 @@ public sealed class CollaborationService(GoBeyondDbContext db, ISubscriptionWork
         await workflow.RejectAsync(subscription, reason.Trim(), DateTime.UtcNow, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new MessageResponse($"Zahtjev klijenta {subscription.ClientProfile.User.FullName} je odbijen, a uplata je vraćena.");
+
+        var clientName = subscription.ClientProfile.User.FullName;
+        return new MessageResponse(subscription.Payments.Any(x => x.Status == PaymentStatus.Disputed)
+            ? $"Zahtjev klijenta {clientName} je odbijen. Uplata je osporena kod banke klijenta, pa se ne vraća automatski; " +
+              "o povratu odlučuje postupak osporavanja."
+            : $"Zahtjev klijenta {clientName} je odbijen, a uplata je vraćena.");
     }
 
     public async Task<List<SubscriberDto>> GetSubscribersAsync(int mentorUserId, SubscriptionSearchObject search,

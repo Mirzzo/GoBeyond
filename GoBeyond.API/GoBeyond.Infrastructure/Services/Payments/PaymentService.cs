@@ -166,7 +166,7 @@ public sealed class PaymentService(
             .FirstOrDefaultAsync(x => x.Id == paymentId && x.Subscription.ClientProfile.UserId == clientUserId, cancellationToken)
             ?? throw new NotFoundException("Uplata nije pronađena.");
 
-        // Succeeded / Refunded / RefundPending su završna stanja - confirm je idempotentan.
+        // Succeeded / Refunded / RefundPending / Disputed su završna stanja - confirm je idempotentan.
         if (payment.Status is PaymentStatus.Pending or PaymentStatus.Failed)
         {
             if (!gateway.IsConfigured) throw new ValidationException(NotConfigured);

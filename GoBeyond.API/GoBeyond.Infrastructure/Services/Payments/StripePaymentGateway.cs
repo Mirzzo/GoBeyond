@@ -33,8 +33,26 @@ public interface IPaymentGateway
     /// "canceled"), vraća trenutno stanje, a pozivalac tada primjenjuje ili vraća uplatu.
     /// </summary>
     Task<PaymentIntentInfo> CancelPaymentIntentAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken);
-    Task RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Puni povrat PaymentIntent-a. Osporena naplata (<see cref="RefundResult.ChargeDisputed"/>) je trajan ishod, ne greška;
+    /// ostale greške Stripe-a bacaju izuzetak kao i drugi pozivi.
+    /// </summary>
+    Task<RefundResult> RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken);
     bool VerifyWebhookSignature(string payload, string signatureHeader, DateTimeOffset now);
+}
+
+/// <summary>Ishod povrata na Stripe-u.</summary>
+public enum RefundResult
+{
+    /// <summary>Novac je vraćen (i kad je naplata već ranije bila vraćena).</summary>
+    Refunded,
+
+    /// <summary>
+    /// Naplata je osporena kod banke klijenta (Stripe dispute, "charge_disputed"): Stripe povrat ne dozvoljava, a o novcu
+    /// odlučuje spor. Ponovljen pokušaj daje isti odgovor dok se spor ne riješi na Stripe-u.
+    /// </summary>
+    ChargeDisputed
 }
 
 /// <summary>
@@ -45,6 +63,7 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
     : IPaymentGateway
 {
     public const string ChargeAlreadyRefunded = "charge_already_refunded";
+    public const string ChargeDisputed = "charge_disputed";
     public const string IntentUnexpectedState = "payment_intent_unexpected_state";
     public const string CommunicationFailed = "Komunikacija sa Stripe servisom nije uspjela. Pokušajte ponovo.";
     private const int WebhookToleranceSeconds = 300;
@@ -84,7 +103,7 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
     {
         using var request = CreateRequest(HttpMethod.Post, $"payment_intents/{Uri.EscapeDataString(paymentIntentId)}/cancel", idempotencyKey);
         request.Content = new FormUrlEncodedContent(new Dictionary<string, string>());
-        var response = await SendAsync(request, cancellationToken, toleratedErrorCode: IntentUnexpectedState);
+        var response = await SendAsync(request, cancellationToken, [IntentUnexpectedState]);
         if (response.IsSuccessStatusCode) return ParseIntent(response);
 
         // Plaćen (ili već otkazan) PaymentIntent se ne može otkazati - vraća se njegovo trenutno stanje.
@@ -96,12 +115,19 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
     /// Puni povrat PaymentIntent-a. Ako je naplata na Stripe-u već potpuno vraćena (npr. ranijim pokušajem čiji je
     /// Idempotency-Key istekao nakon 24 h, ili ručno iz Stripe Dashboard-a), Stripe vraća "charge_already_refunded" -
     /// novac je već kod klijenta, pa se povrat smatra izvršenim (inače bi RefundPending i odbijanje zahtjeva zauvijek padali).
+    /// Osporenu naplatu ("charge_disputed") Stripe ne vraća dok spor traje, pa se to javlja kao
+    /// <see cref="RefundResult.ChargeDisputed"/> umjesto greške koju bi pozivalac ponavljao.
     /// </summary>
-    public async Task RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken)
+    public async Task<RefundResult> RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken)
     {
         using var request = CreateRequest(HttpMethod.Post, "refunds", idempotencyKey);
         request.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["payment_intent"] = paymentIntentId });
-        using var _ = await SendAsync(request, cancellationToken, toleratedErrorCode: ChargeAlreadyRefunded);
+        using var response = await SendAsync(request, cancellationToken, [ChargeAlreadyRefunded, ChargeDisputed]);
+        if (response.IsSuccessStatusCode) return RefundResult.Refunded;
+
+        // HttpClient je tijelo odgovora već učitao u memoriju, pa se kod greške čita ponovo.
+        var (_, errorCode) = await ReadErrorAsync(response, cancellationToken);
+        return errorCode == ChargeDisputed ? RefundResult.ChargeDisputed : RefundResult.Refunded;
     }
 
     /// <summary>Stripe-Signature: "t=timestamp,v1=hex(HMAC-SHA256(secret, "{t}.{payload}"))".</summary>
@@ -153,9 +179,12 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
         return request;
     }
 
-    /// <param name="toleratedErrorCode">Stripe error.code koji znači da je traženo stanje već postignuto (odgovor se tada vraća bez greške).</param>
+    /// <param name="toleratedErrorCodes">
+    /// Stripe error.code-ovi koje pozivalac obrađuje kao poznat ishod (npr. traženo stanje je već postignuto); odgovor se
+    /// tada vraća bez greške.
+    /// </param>
     private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken,
-        string? toleratedErrorCode = null)
+        IReadOnlyCollection<string>? toleratedErrorCodes = null)
     {
         HttpResponseMessage response;
         try
@@ -179,9 +208,9 @@ public sealed class StripePaymentGateway(HttpClient http, IOptions<PaymentOption
 
         var (errorType, errorCode) = await ReadErrorAsync(response, cancellationToken);
         var path = request.RequestUri?.AbsolutePath;
-        if (toleratedErrorCode is not null && errorCode == toleratedErrorCode)
+        if (errorCode is not null && toleratedErrorCodes?.Contains(errorCode) == true)
         {
-            logger.LogInformation("Stripe answered {ErrorCode} for {Path}; the requested state already exists.", errorCode, path);
+            logger.LogInformation("Stripe answered {ErrorCode} for {Path}; handled as a known outcome.", errorCode, path);
             return response;
         }
 

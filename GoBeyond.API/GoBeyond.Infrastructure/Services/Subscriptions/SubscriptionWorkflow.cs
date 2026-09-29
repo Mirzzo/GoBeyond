@@ -23,7 +23,10 @@ public interface ISubscriptionWorkflow
     /// <summary>AwaitingMentor → Active (idempotentno ako je već Active).</summary>
     void Accept(Subscription subscription, DateTime now);
 
-    /// <summary>AwaitingMentor → Rejected uz povrat uplata preko Stripe-a (ako povrat ne uspije, odbijanje se ne izvršava).</summary>
+    /// <summary>
+    /// AwaitingMentor → Rejected uz povrat uplata preko Stripe-a (ako povrat ne uspije, odbijanje se ne izvršava). Osporena
+    /// naplata se ne vraća, nego dobija status Disputed (vidi <see cref="RefundOrFailAsync"/>).
+    /// </summary>
     Task RejectAsync(Subscription subscription, string reason, DateTime now, CancellationToken cancellationToken);
 
     /// <summary>Samo prelaz u Cancelled i obavijesti, bez povrata; otkazivanje pretplate sa uplatama ide kroz <see cref="CancelAsync"/>.</summary>
@@ -31,8 +34,8 @@ public interface ISubscriptionWorkflow
 
     /// <summary>
     /// Otkazivanje (klijent, administrator, brisanje korisnika). Plaćen zahtjev koji mentor nije prihvatio (AwaitingMentor) se
-    /// vraća klijentu, a tekst obavijesti navodi vraćeni iznos; ako povrat ne uspije, baca ValidationException sa
-    /// <paramref name="refundFailedMessage"/> i pozivalac ništa ne snima. Active i PendingPayment ostaju bez povrata.
+    /// vraća klijentu, a tekst obavijesti navodi vraćeni (i osporeni) iznos; ako povrat ne uspije, baca ValidationException
+    /// sa <paramref name="refundFailedMessage"/> i pozivalac ništa ne snima. Active i PendingPayment ostaju bez povrata.
     /// Nedovršene uplate se zatvaraju (<see cref="SettlePendingPaymentsAsync"/>). Mentor dobija obavijest samo ako je zahtjev
     /// vidio (pretplata nije bila PendingPayment). Očekuje učitane Payments.
     /// </summary>
@@ -58,10 +61,16 @@ public interface ISubscriptionWorkflow
     /// </summary>
     Task<bool> SettlePendingPaymentsAsync(Subscription subscription, DateTime now, bool stripeErrorsAreFatal, CancellationToken cancellationToken);
 
-    /// <summary>Povrat novca; baca ValidationException sa zadanom porukom ako Stripe odbije povrat.</summary>
+    /// <summary>
+    /// Povrat novca; baca ValidationException sa zadanom porukom ako Stripe odbije povrat. Naplatu osporenu kod banke
+    /// klijenta Stripe ne vraća, pa uplata tada dobija status Disputed (bez izuzetka) i pozivalac nastavlja.
+    /// </summary>
     Task RefundOrFailAsync(Payment payment, DateTime now, string failureMessage, CancellationToken cancellationToken);
 
-    /// <summary>Ponovni pokušaj povrata za uplatu u statusu RefundPending. Vraća true ako je povrat uspio.</summary>
+    /// <summary>
+    /// Ponovni pokušaj povrata za uplatu u statusu RefundPending. Vraća true ako je povrat uspio. Osporena naplata prelazi u
+    /// Disputed (klijent dobija obavijest) i više se ne pokušava; ostale greške Stripe-a ostavljaju RefundPending.
+    /// </summary>
     Task<bool> RetryPendingRefundAsync(Payment payment, DateTime now, CancellationToken cancellationToken);
 }
 
@@ -72,6 +81,9 @@ public sealed class SubscriptionWorkflow(
     ILogger<SubscriptionWorkflow> logger) : ISubscriptionWorkflow
 {
     public const string RejectRefundFailed = "Odbijanje nije moguće: povrat uplate klijentu nije uspio. Pokušajte ponovo.";
+
+    private const string DisputedTitle = "Uplata je osporena";
+    private const string DisputeOutcomeSentence = " O povratu odlučuje postupak osporavanja.";
 
     private static readonly PaymentStatus[] RefundableStatuses = [PaymentStatus.Succeeded, PaymentStatus.RefundPending];
 
@@ -101,7 +113,7 @@ public sealed class SubscriptionWorkflow(
         if (subscription.Status != SubscriptionStatus.AwaitingMentor)
             throw new ValidationException("Zahtjev se može odbiti samo dok čeka odgovor mentora.");
 
-        var refunded = await RefundAllAsync(subscription, now, RejectRefundFailed, cancellationToken);
+        var refunds = await RefundAllAsync(subscription, now, RejectRefundFailed, cancellationToken);
 
         subscription.Status = SubscriptionStatus.Rejected;
         subscription.StatusReason = reason;
@@ -109,14 +121,14 @@ public sealed class SubscriptionWorkflow(
         var mentor = subscription.MentorProfile.User;
         notifications.Notify(subscription.ClientProfile.User, NotificationType.RequestRejected,
             "Zahtjev za saradnju je odbijen",
-            $"Vaš zahtjev za saradnju sa mentorom {mentor.FullName} je odbijen. Razlog: {DomainTexts.Sentence(reason)}{RefundSentence(refunded, subscription.Currency)}",
+            $"Vaš zahtjev za saradnju sa mentorom {mentor.FullName} je odbijen. Razlog: {DomainTexts.Sentence(reason)}{RefundSentences(refunds, subscription.Currency)}",
             sendEmail: true);
     }
 
     public void Cancel(Subscription subscription, string reason, DateTime now, bool notifyClient, bool notifyMentor)
     {
         EnsureCancellable(subscription);
-        CancelAndNotify(subscription, reason, now, notifyClient, notifyMentor, refunded: 0);
+        CancelAndNotify(subscription, reason, now, notifyClient, notifyMentor, refunds: default);
     }
 
     public async Task CancelAsync(Subscription subscription, string reason, DateTime now, bool notifyClient, bool notifyMentor,
@@ -125,10 +137,10 @@ public sealed class SubscriptionWorkflow(
         EnsureCancellable(subscription);
 
         // Zahtjev koji mentor nije prihvatio: usluga nije pružena, pa se uplata vraća (kao kod odbijanja zahtjeva).
-        var refunded = subscription.Status == SubscriptionStatus.AwaitingMentor
+        var refunds = subscription.Status == SubscriptionStatus.AwaitingMentor
             ? await RefundAllAsync(subscription, now, refundFailedMessage, cancellationToken)
-            : 0;
-        CancelAndNotify(subscription, reason, now, notifyClient, notifyMentor, refunded);
+            : default;
+        CancelAndNotify(subscription, reason, now, notifyClient, notifyMentor, refunds);
 
         // Nakon prelaza u Cancelled: naplaćena nedovršena uplata se vraća, a plativ PaymentIntent otkazuje.
         await SettlePendingPaymentsAsync(subscription, now, stripeErrorsAreFatal: true, cancellationToken);
@@ -151,7 +163,8 @@ public sealed class SubscriptionWorkflow(
 
     public async Task<bool> ApplySuccessfulPaymentAsync(Payment payment, DateTime now, CancellationToken cancellationToken)
     {
-        if (payment.Status is PaymentStatus.Succeeded or PaymentStatus.Refunded or PaymentStatus.RefundPending) return false;
+        if (payment.Status is PaymentStatus.Succeeded or PaymentStatus.Refunded or PaymentStatus.RefundPending or PaymentStatus.Disputed)
+            return false;
 
         payment.Status = PaymentStatus.Succeeded;
         payment.PaidAt ??= now;
@@ -272,7 +285,18 @@ public sealed class SubscriptionWorkflow(
             return false;
         }
 
-        notifications.Notify(payment.Subscription.ClientProfile.User, NotificationType.PaymentRefunded, "Povrat uplate je izvršen",
+        var client = payment.Subscription.ClientProfile.User;
+        if (payment.Status == PaymentStatus.Disputed)
+        {
+            // Klijent je ranije obaviješten da se povrat automatski ponavlja, pa dobija obavijest da se više ne ponavlja.
+            notifications.Notify(client, NotificationType.PaymentRefunded, DisputedTitle,
+                $"Uplata od {Money(payment.Amount, payment.Currency)} je osporena kod vaše banke, pa se njen povrat više ne " +
+                $"ponavlja automatski.{DisputeOutcomeSentence}",
+                sendEmail: true);
+            return false;
+        }
+
+        notifications.Notify(client, NotificationType.PaymentRefunded, "Povrat uplate je izvršen",
             $"Iznos od {Money(payment.Amount, payment.Currency)} je vraćen na vašu karticu.", sendEmail: true);
         return true;
     }
@@ -293,7 +317,8 @@ public sealed class SubscriptionWorkflow(
             throw new ValidationException($"Pretplata u statusu \"{DomainTexts.SubscriptionStatusName(subscription.Status)}\" se ne može otkazati.");
     }
 
-    private void CancelAndNotify(Subscription subscription, string reason, DateTime now, bool notifyClient, bool notifyMentor, decimal refunded)
+    private void CancelAndNotify(Subscription subscription, string reason, DateTime now, bool notifyClient, bool notifyMentor,
+        RefundTotals refunds)
     {
         // Neplaćenu (PendingPayment) pretplatu mentor nikad nije vidio, pa o njenom prekidu ne dobija obavijest.
         var mentorSawRequest = subscription.Status != SubscriptionStatus.PendingPayment;
@@ -306,23 +331,29 @@ public sealed class SubscriptionWorkflow(
         var mentor = subscription.MentorProfile.User;
         if (notifyClient)
             notifications.Notify(client, NotificationType.SubscriptionCancelled, "Saradnja je prekinuta",
-                $"Saradnja sa mentorom {mentor.FullName} je prekinuta. Razlog: {DomainTexts.Sentence(reason)}{RefundSentence(refunded, subscription.Currency)}",
+                $"Saradnja sa mentorom {mentor.FullName} je prekinuta. Razlog: {DomainTexts.Sentence(reason)}{RefundSentences(refunds, subscription.Currency)}",
                 sendEmail: true);
         if (notifyMentor && mentorSawRequest)
             notifications.Notify(mentor, NotificationType.SubscriptionCancelled, "Saradnja je prekinuta",
                 $"Saradnja sa klijentom {client.FullName} je prekinuta. Razlog: {DomainTexts.Sentence(reason)}", sendEmail: true);
     }
 
-    /// <summary>Vraća sve uspješne (i RefundPending) uplate pretplate; rezultat je ukupno vraćeni iznos (za tekst obavijesti).</summary>
-    private async Task<decimal> RefundAllAsync(Subscription subscription, DateTime now, string failureMessage, CancellationToken cancellationToken)
+    /// <summary>
+    /// Vraća sve uspješne (i RefundPending) uplate pretplate; rezultat je ukupno vraćeni i ukupno osporeni iznos (za tekst
+    /// obavijesti).
+    /// </summary>
+    private async Task<RefundTotals> RefundAllAsync(Subscription subscription, DateTime now, string failureMessage,
+        CancellationToken cancellationToken)
     {
-        var refunded = 0m;
+        RefundTotals totals = default;
         foreach (var payment in subscription.Payments.Where(x => RefundableStatuses.Contains(x.Status)).ToList())
         {
             await RefundOrFailAsync(payment, now, failureMessage, cancellationToken);
-            refunded += payment.Amount;
+            totals = payment.Status == PaymentStatus.Disputed
+                ? totals with { Disputed = totals.Disputed + payment.Amount }
+                : totals with { Refunded = totals.Refunded + payment.Amount };
         }
-        return refunded;
+        return totals;
     }
 
     /// <summary>
@@ -342,9 +373,13 @@ public sealed class SubscriptionWorkflow(
         try
         {
             await RefundAsync(payment, now, cancellationToken);
-            notifications.Notify(client, NotificationType.PaymentRefunded, "Uplata je vraćena",
+            var disputed = payment.Status == PaymentStatus.Disputed;
+            notifications.Notify(client, NotificationType.PaymentRefunded, disputed ? DisputedTitle : "Uplata je vraćena",
                 $"Uplata od {Money(payment.Amount, payment.Currency)} za saradnju sa mentorom {mentor.FullName} nije mogla biti primijenjena " +
-                $"jer pretplata više nije u odgovarajućem statusu ({statusName}). Iznos je vraćen na vašu karticu.",
+                $"jer pretplata više nije u odgovarajućem statusu ({statusName}). " +
+                (disputed
+                    ? $"Uplata je osporena kod vaše banke, pa se ne vraća automatski.{DisputeOutcomeSentence}"
+                    : "Iznos je vraćen na vašu karticu."),
                 sendEmail: true);
         }
         catch (ValidationException ex)
@@ -361,14 +396,22 @@ public sealed class SubscriptionWorkflow(
     /// <summary>
     /// Pravi Stripe PaymentIntent ("pi_...") se vraća preko Stripe Refund API-ja (Idempotency-Key iz
     /// <see cref="RefundIdempotencyKey"/>, pa ponovljen pokušaj ne vraća novac dvaput). Seed (demo) uplate nikad nisu
-    /// naplaćene preko Stripe-a ("seed_pi_..."), pa se za njih samo evidentira povrat.
+    /// naplaćene preko Stripe-a ("seed_pi_..."), pa se za njih samo evidentira povrat. Osporenu naplatu Stripe ne vraća:
+    /// uplata tada dobija status Disputed, pa je automatski povrat više ne pokušava.
     /// </summary>
     private async Task RefundAsync(Payment payment, DateTime now, CancellationToken cancellationToken)
     {
         if (!RefundableStatuses.Contains(payment.Status)) return;
 
-        if (payment.StripePaymentIntentId.StartsWith("pi_", StringComparison.Ordinal))
-            await paymentGateway.RefundAsync(payment.StripePaymentIntentId, RefundIdempotencyKey(payment), cancellationToken);
+        if (payment.StripePaymentIntentId.StartsWith("pi_", StringComparison.Ordinal) &&
+            await paymentGateway.RefundAsync(payment.StripePaymentIntentId, RefundIdempotencyKey(payment), cancellationToken) ==
+            RefundResult.ChargeDisputed)
+        {
+            logger.LogWarning("Refund of payment {PaymentId} is not possible because the charge is disputed; marked Disputed " +
+                              "and left to the dispute in Stripe, with no further automatic retries.", payment.Id);
+            payment.Status = PaymentStatus.Disputed;
+            return;
+        }
 
         payment.Status = PaymentStatus.Refunded;
         payment.RefundedAt = now;
@@ -377,8 +420,14 @@ public sealed class SubscriptionWorkflow(
     /// <summary>Datum u vremenskoj zoni platforme (Lifecycle:TimeZoneId); završava tačkom, pa rečenica ne dodaje drugu.</summary>
     private string Date(DateTime? value) => DomainTexts.Date(value, lifecycleOptions.Value.TimeZoneId);
 
-    private static string RefundSentence(decimal refunded, string currency) =>
-        refunded > 0 ? $" Uplaćeni iznos od {Money(refunded, currency)} biće vraćen na vašu karticu." : string.Empty;
+    private static string RefundSentences(RefundTotals refunds, string currency) =>
+        (refunds.Refunded > 0 ? $" Uplaćeni iznos od {Money(refunds.Refunded, currency)} biće vraćen na vašu karticu." : string.Empty) +
+        (refunds.Disputed > 0
+            ? $" Uplata od {Money(refunds.Disputed, currency)} je osporena kod vaše banke, pa se ne vraća automatski.{DisputeOutcomeSentence}"
+            : string.Empty);
 
     private static string Money(decimal amount, string currency) => DomainTexts.Money(amount, currency);
+
+    /// <summary>Ukupno vraćeni i ukupno osporeni (Disputed) iznos uplata jedne pretplate.</summary>
+    private readonly record struct RefundTotals(decimal Refunded, decimal Disputed);
 }

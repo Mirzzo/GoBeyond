@@ -35,6 +35,12 @@ internal sealed class FakePaymentGateway : IPaymentGateway
     public Func<string, Task>? BeforeRefund { get; set; }
 
     public Dictionary<string, PaymentIntentInfo> Intents { get; } = new();
+
+    /// <summary>PaymentIntent-i čija je naplata osporena (dispute): povrat daje <see cref="RefundResult.ChargeDisputed"/>.</summary>
+    public HashSet<string> DisputedCharges { get; } = [];
+
+    /// <summary>Svi pokušaji povrata (i neuspjeli), redom.</summary>
+    public List<string> RefundAttempts { get; } = [];
     public List<(decimal Amount, IReadOnlyDictionary<string, string> Metadata, string IdempotencyKey)> CreateCalls { get; } = [];
     public List<(string PaymentIntentId, string IdempotencyKey)> Refunds { get; } = [];
     public List<(string PaymentIntentId, string IdempotencyKey)> Cancels { get; } = [];
@@ -77,11 +83,17 @@ internal sealed class FakePaymentGateway : IPaymentGateway
         }
     }
 
-    public async Task RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken)
+    public async Task<RefundResult> RefundAsync(string paymentIntentId, string idempotencyKey, CancellationToken cancellationToken)
     {
+        lock (_sync) RefundAttempts.Add(paymentIntentId);
         if (BeforeRefund is { } hook) await hook(paymentIntentId);
         if (FailRefunds) throw new ValidationException("Stripe nije prihvatio zahtjev.");
-        lock (_sync) Refunds.Add((paymentIntentId, idempotencyKey));
+        lock (_sync)
+        {
+            if (DisputedCharges.Contains(paymentIntentId)) return RefundResult.ChargeDisputed;
+            Refunds.Add((paymentIntentId, idempotencyKey));
+            return RefundResult.Refunded;
+        }
     }
 
     public bool VerifyWebhookSignature(string payload, string signatureHeader, DateTimeOffset now) => WebhookSignatureValid;

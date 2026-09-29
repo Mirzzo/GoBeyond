@@ -233,7 +233,8 @@ public sealed class SubscriptionLifecycleProcessor(
 
     /// <summary>
     /// Ponovni pokušaj povrata za uplate koje nisu mogle biti primijenjene (status RefundPending). Neočekivana greška jedne
-    /// uplate (npr. Stripe 409 dok je isti povrat još u obradi) ne zaustavlja ostale.
+    /// uplate (npr. Stripe 409 dok je isti povrat još u obradi) ne zaustavlja ostale. Osporena naplata prelazi u Disputed,
+    /// pa se u sljedećim ciklusima više ne pokušava.
     /// </summary>
     private async Task<int> RetryPendingRefundsAsync(DateTime now, CancellationToken cancellationToken)
     {
