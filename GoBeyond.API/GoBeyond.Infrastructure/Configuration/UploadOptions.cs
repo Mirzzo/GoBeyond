@@ -17,9 +17,9 @@ public sealed class UploadOptions
     /// <summary>Najveća veličina fajla u MB (za poruke korisniku).</summary>
     public string MaxFileSizeText => $"{MaxFileSizeBytes / (1024d * 1024d):0.#} MB";
 
-    /// <summary>Poruka kada je cijeli zahtjev (multipart) prevelik.</summary>
+    /// <summary>Poruka kada je cijeli zahtjev (multipart) prevelik. Generička (bez broja fajlova) da vrijedi i za endpointe s jednim fajlom.</summary>
     public string RequestTooLargeMessage =>
-        $"Zahtjev je prevelik. Fajl može imati najviše {MaxFileSizeText}, a zahtjev najviše {MaxCertificatesPerUpload} takva fajla.";
+        $"Zahtjev je prevelik. Pojedinačni fajl može imati najviše {MaxFileSizeText}.";
 
     /// <summary>Poruka kada broj certifikata nije u dozvoljenom rasponu.</summary>
     public string CertificateCountMessage =>

@@ -48,34 +48,57 @@ public sealed class DayPlanDto
 
 public sealed class CreatePlanRequest
 {
+    private string? _motivationalQuote;
+
     [Range(1, int.MaxValue, ErrorMessage = "Odaberite pretplatu za koju se kreira plan.")]
     public int SubscriptionId { get; set; }
 
     [StringLength(300, ErrorMessage = "Motivacijska poruka može imati najviše 300 znakova.")]
-    public string? MotivationalQuote { get; set; }
+    public string? MotivationalQuote
+    {
+        get => _motivationalQuote;
+        set => _motivationalQuote = value?.Trim();
+    }
 }
 
 public sealed class UpdatePlanRequest
 {
+    private string? _motivationalQuote;
+
     [StringLength(300, ErrorMessage = "Motivacijska poruka može imati najviše 300 znakova.")]
-    public string? MotivationalQuote { get; set; }
+    public string? MotivationalQuote
+    {
+        get => _motivationalQuote;
+        set => _motivationalQuote = value?.Trim();
+    }
 }
 
 public sealed class UpsertDayPlanRequest
 {
+    private string _trainingDescription = string.Empty;
+    private string _nutritionDescription = string.Empty;
+
     [Range(1, 600, ErrorMessage = "Trajanje treninga mora biti između 1 i 600 minuta.")]
     public int TrainingDurationMinutes { get; set; }
 
     [Required(ErrorMessage = "Opis treninga je obavezan.")]
     [StringLength(8000, MinimumLength = 10, ErrorMessage = "Opis treninga mora imati 10–8000 znakova.")]
-    public string TrainingDescription { get; set; } = string.Empty;
+    public string TrainingDescription
+    {
+        get => _trainingDescription;
+        set => _trainingDescription = value?.Trim() ?? string.Empty;
+    }
 
     [Range(1, 1440, ErrorMessage = "Trajanje ishrane mora biti između 1 i 1440 minuta.")]
     public int? NutritionDurationMinutes { get; set; }
 
     [Required(ErrorMessage = "Opis ishrane je obavezan.")]
     [StringLength(8000, MinimumLength = 10, ErrorMessage = "Opis ishrane mora imati 10–8000 znakova.")]
-    public string NutritionDescription { get; set; } = string.Empty;
+    public string NutritionDescription
+    {
+        get => _nutritionDescription;
+        set => _nutritionDescription = value?.Trim() ?? string.Empty;
+    }
 }
 
 public sealed class LogTrainingSessionRequest

@@ -91,9 +91,15 @@ public sealed class CertificateDto
 
 public sealed class RejectRequest
 {
+    private string _reason = string.Empty;
+
     [Required(ErrorMessage = "Razlog je obavezan.")]
     [StringLength(500, MinimumLength = 10, ErrorMessage = "Razlog mora imati 10–500 znakova.")]
-    public string Reason { get; set; } = string.Empty;
+    public string Reason
+    {
+        get => _reason;
+        set => _reason = value?.Trim() ?? string.Empty;
+    }
 }
 
 public sealed class AdminClientDto
@@ -127,9 +133,15 @@ public sealed class AdminSubscriptionDto
 
 public sealed class CancelSubscriptionRequest
 {
+    private string _reason = string.Empty;
+
     [Required(ErrorMessage = "Razlog je obavezan.")]
     [StringLength(300, MinimumLength = 5, ErrorMessage = "Razlog mora imati 5–300 znakova.")]
-    public string Reason { get; set; } = string.Empty;
+    public string Reason
+    {
+        get => _reason;
+        set => _reason = value?.Trim() ?? string.Empty;
+    }
 }
 
 public sealed class AnnouncementDto
@@ -145,13 +157,24 @@ public sealed class AnnouncementDto
 
 public class UpdateAnnouncementRequest
 {
+    private string _title = string.Empty;
+    private string _content = string.Empty;
+
     [Required(ErrorMessage = "Naslov je obavezan.")]
     [StringLength(120, MinimumLength = 3, ErrorMessage = "Naslov mora imati 3–120 znakova.")]
-    public string Title { get; set; } = string.Empty;
+    public string Title
+    {
+        get => _title;
+        set => _title = value?.Trim() ?? string.Empty;
+    }
 
     [Required(ErrorMessage = "Sadržaj je obavezan.")]
     [StringLength(2000, MinimumLength = 10, ErrorMessage = "Sadržaj mora imati 10–2000 znakova.")]
-    public string Content { get; set; } = string.Empty;
+    public string Content
+    {
+        get => _content;
+        set => _content = value?.Trim() ?? string.Empty;
+    }
 }
 
 public sealed class CreateAnnouncementRequest : UpdateAnnouncementRequest

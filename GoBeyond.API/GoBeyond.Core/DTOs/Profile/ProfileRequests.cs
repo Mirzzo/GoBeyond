@@ -37,6 +37,8 @@ public class AccountFieldsRequest
 
 public sealed class MentorProfileRequest
 {
+    private string _bio = string.Empty;
+
     [Range(1, int.MaxValue, ErrorMessage = "Odaberite vrstu treninga.")]
     public int TrainingTypeId { get; set; }
 
@@ -45,12 +47,17 @@ public sealed class MentorProfileRequest
 
     [Required(ErrorMessage = "Biografija je obavezna.")]
     [StringLength(4000, MinimumLength = 50, ErrorMessage = "Biografija mora imati 50–4000 znakova.")]
-    public string Bio { get; set; } = string.Empty;
+    public string Bio
+    {
+        get => _bio;
+        set => _bio = value?.Trim() ?? string.Empty;
+    }
 
     [Range(0, 60, ErrorMessage = "Godine iskustva moraju biti cijeli broj između 0 i 60.")]
     public int YearsOfExperience { get; set; }
 
     [Range(typeof(decimal), "1", "1000", ErrorMessage = "Mjesečna cijena mora biti između 1 i 1000.")]
+    [MaxDecimalPlaces(2, ErrorMessage = "Mjesečna cijena može imati najviše dvije decimale.")]
     public decimal MonthlyPrice { get; set; }
 
     [ItemCount(1, 10, ErrorMessage = "Odaberite najmanje jednu, a najviše 10 specijalizacija.")]
