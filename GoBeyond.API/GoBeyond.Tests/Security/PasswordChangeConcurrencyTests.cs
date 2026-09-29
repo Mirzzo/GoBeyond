@@ -207,6 +207,27 @@ public sealed class PasswordChangeConcurrencyTests : IAsyncLifetime
         Assert.True(profileLock < userLock, "Korisnik je zaključan prije svog profila.");
     }
 
+    /// <summary>
+    /// Brisanje korisnika zaključava njegove otvorene pretplate (redom po Id-u) prije samog korisnika, istim redoslijedom kao
+    /// prelazi pretplata, koji zaključaju pretplatu pa upisuju obavijest korisniku (strani ključ na njegov red). Korisnik
+    /// zaključan prije pretplata bi na SQL Serveru davao deadlock sa istovremenim prelazom iste pretplate.
+    /// </summary>
+    [Fact]
+    public async Task DeleteUser_LocksItsOpenSubscriptionsBeforeTheUser()
+    {
+        var subscriptionId = await _db.AddSubscriptionAsync(SubscriptionStatus.Active);
+        var recorder = new TransactionCommandRecorder();
+        await using (var db = _db.CreateContext(recorder))
+            await Admin(db).DeleteAsync(adminUserId: 0, UserId);
+
+        var subscriptionLock = recorder.Commands.FindIndex(x => x.StartsWith("UPDATE \"Subscriptions\"", StringComparison.Ordinal));
+        var userLock = recorder.Commands.FindIndex(x => x.StartsWith("UPDATE \"Users\"", StringComparison.Ordinal));
+        Assert.True(subscriptionLock >= 0, "Otvorena pretplata nije zaključana.");
+        Assert.True(userLock >= 0, "Korisnik nije zaključan.");
+        Assert.True(subscriptionLock < userLock, "Korisnik je zaključan prije svojih otvorenih pretplata.");
+        Assert.Equal(SubscriptionStatus.Cancelled, (await _db.SubscriptionAsync(subscriptionId)).Status);
+    }
+
     private Task Operation(GoBeyondDbContext db, string operation) => operation switch
     {
         "change-password" => ChangeAsync(db, _sessionA, "Moja12345"),
