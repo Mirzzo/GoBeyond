@@ -75,8 +75,10 @@ public sealed class ProgressService(
         if (entry is null)
         {
             entry = new ProgressEntry { ClientProfileId = clientId, Year = year, Month = month, CreatedAt = now };
-            // Pri kreiranju se snima kopija plana koji klijent trenutno koristi ("HISTORIJA PLANA").
-            if (await plans.FindCurrentPlanAsync(clientId, cancellationToken) is { } plan)
+            // Pri kreiranju se snima kopija plana koji klijent trenutno koristi ("HISTORIJA PLANA"), ali samo za tekući
+            // mjesec - za prošle mjesece trenutni plan tada možda još nije ni postojao, pa se snapshot ne prilaže.
+            var isCurrentMonth = year == now.Year && month == now.Month;
+            if (isCurrentMonth && await plans.FindCurrentPlanAsync(clientId, cancellationToken) is { } plan)
             {
                 entry.TrainingPlanId = plan.Id;
                 entry.PlanSnapshotJson = PlanMapper.ToSnapshotJson(plan);
