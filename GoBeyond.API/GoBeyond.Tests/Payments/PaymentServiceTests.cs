@@ -19,6 +19,7 @@ public sealed class PaymentServiceTests : IDisposable
 {
     private const decimal Price = 29.99m;
     private const int ClientUserId = 2;
+    private static readonly DateTime SubscriptionCreatedAt = new DateTime(2026, 9, 28, 10, 15, 30, DateTimeKind.Utc).AddTicks(1234567);
 
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
     private readonly FakePaymentGateway _gateway = new();
@@ -69,11 +70,32 @@ public sealed class PaymentServiceTests : IDisposable
 
         Assert.NotEqual(_paymentId, result.PaymentId);
         var call = Assert.Single(_gateway.CreateCalls);
-        Assert.Equal($"create-intent:{_subscriptionId}:Initial:2:2999", call.IdempotencyKey);
+        Assert.Equal($"create-intent:{_subscriptionId}:20260928T1015301234567:Initial:2:2999", call.IdempotencyKey);
         Assert.Equal(_subscriptionId.ToString(), call.Metadata[PaymentIntentInfo.MetadataSubscriptionId]);
         Assert.Equal("Initial", call.Metadata[PaymentIntentInfo.MetadataPurpose]);
         await using var db = CreateContext();
         Assert.Equal(PaymentStatus.Failed, (await db.Payments.SingleAsync(x => x.Id == _paymentId)).Status);
+    }
+
+    [Fact]
+    public void CreateIntentIdempotencyKey_IsStableForRetriesButDiffersForSameSubscriptionIdInAnotherDatabase()
+    {
+        // Stripe pamti ključ 24 h po nalogu; nakon "docker compose down -v" (ili na drugoj instalaciji sa istim
+        // Stripe ključevima) pretplata sa istim Id-em ne smije dobiti isti ključ, inače Stripe vraća idempotency_error
+        // ili stari (možda već plaćen) PaymentIntent.
+        var original = new Subscription { Id = 1004, CreatedAt = SubscriptionCreatedAt };
+        var retry = new Subscription { Id = 1004, CreatedAt = SubscriptionCreatedAt };
+        var afterDatabaseReset = new Subscription { Id = 1004, CreatedAt = SubscriptionCreatedAt.AddTicks(1) };
+
+        var key = PaymentService.CreateIntentIdempotencyKey(original, PaymentPurpose.Initial, 1, 3999);
+
+        Assert.Equal("create-intent:1004:20260928T1015301234567:Initial:1:3999", key);
+        Assert.Equal(key, PaymentService.CreateIntentIdempotencyKey(retry, PaymentPurpose.Initial, 1, 3999));
+        Assert.NotEqual(key, PaymentService.CreateIntentIdempotencyKey(afterDatabaseReset, PaymentPurpose.Initial, 1, 3999));
+        Assert.NotEqual(key, PaymentService.CreateIntentIdempotencyKey(original, PaymentPurpose.Renewal, 1, 3999));
+        Assert.NotEqual(key, PaymentService.CreateIntentIdempotencyKey(original, PaymentPurpose.Initial, 2, 3999));
+        Assert.NotEqual(key, PaymentService.CreateIntentIdempotencyKey(original, PaymentPurpose.Initial, 1, 4999));
+        Assert.True(key.Length <= 255); // Stripe limit za Idempotency-Key
     }
 
     [Fact]
@@ -150,6 +172,36 @@ public sealed class PaymentServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Webhook_PaymentFailed_KeepsPaymentPendingSoRetryReusesTheSameIntent()
+    {
+        // Odbijena kartica: Stripe šalje payment_intent.payment_failed, a PaymentIntent se vraća u requires_payment_method
+        // (provjereno sa pravim Stripe-om i stripe listen). Ponovni create-intent mora vratiti isti PaymentIntent.
+        var payload = WebhookPayload("payment_intent.payment_failed", "pi_test_1", _subscriptionId, "Initial", 2999, "usd",
+            status: "requires_payment_method");
+
+        await WithService(s => s.HandleWebhookAsync(payload, "t=1,v1=x"));
+        var retry = await CreateIntentAsync();
+
+        await using var db = CreateContext();
+        Assert.Equal(PaymentStatus.Pending, (await db.Payments.SingleAsync()).Status);
+        Assert.Equal((_paymentId, "pi_test_1_secret"), (retry.PaymentId, retry.ClientSecret));
+        Assert.Empty(_gateway.CreateCalls);
+    }
+
+    [Fact]
+    public async Task Webhook_Canceled_MarksPaymentFailed()
+    {
+        SetIntentStatus("pi_test_1", "canceled");
+        var payload = WebhookPayload("payment_intent.canceled", "pi_test_1", _subscriptionId, "Initial", 2999, "usd", status: "canceled");
+
+        await WithService(s => s.HandleWebhookAsync(payload, "t=1,v1=x"));
+
+        await using var db = CreateContext();
+        Assert.Equal(PaymentStatus.Failed, (await db.Payments.SingleAsync()).Status);
+        Assert.Equal(SubscriptionStatus.PendingPayment, (await db.Subscriptions.SingleAsync()).Status);
+    }
+
+    [Fact]
     public async Task Webhook_WithInvalidSignature_IsRejected()
     {
         _gateway.WebhookSignatureValid = false;
@@ -172,10 +224,121 @@ public sealed class PaymentServiceTests : IDisposable
         var result = await ConfirmAsync();
 
         Assert.Equal(SubscriptionStatus.Cancelled, result.Status);
-        Assert.Equal([("pi_test_1", $"refund:{_paymentId}")], _gateway.Refunds);
+        Assert.Equal([("pi_test_1", "refund:pi_test_1")], _gateway.Refunds);
         await using var check = CreateContext();
         Assert.Equal(PaymentStatus.Refunded, (await check.Payments.SingleAsync()).Status);
         Assert.Contains(check.Notifications, x => x.Type == NotificationType.PaymentRefunded);
+    }
+
+    [Fact]
+    public async Task Reconcile_CardChargedButConfirmNeverArrived_AppliesPayment()
+    {
+        // Aplikacija ugašena nakon uspješnog plaćanja, prije POST confirm; webhook nije podešen.
+        await UpdateAsync((_, payment) => payment.CreatedAt = DateTime.UtcNow.AddMinutes(-10));
+        SetIntentStatus("pi_test_1", "succeeded");
+
+        var applied = await WithService(s => s.ReconcilePendingAsync(DateTime.UtcNow.AddMinutes(-5), DateTime.UtcNow.AddHours(-48)));
+
+        Assert.Equal(1, applied);
+        await using var db = CreateContext();
+        Assert.Equal(PaymentStatus.Succeeded, (await db.Payments.SingleAsync()).Status);
+        Assert.Equal(SubscriptionStatus.AwaitingMentor, (await db.Subscriptions.SingleAsync()).Status);
+        Assert.Contains(db.Notifications, x => x.Type == NotificationType.NewCollaborationRequest);
+    }
+
+    [Fact]
+    public async Task Reconcile_CardChargedAfterClientCancelled_RefundsAutomatically()
+    {
+        // Klijent platio, aplikacija nije stigla potvrditi, a zatim je otkazao pretplatu (PendingPayment → Cancelled).
+        await UpdateAsync((subscription, payment) =>
+        {
+            subscription.Status = SubscriptionStatus.Cancelled;
+            payment.CreatedAt = DateTime.UtcNow.AddMinutes(-10);
+        });
+        SetIntentStatus("pi_test_1", "succeeded");
+
+        await WithService(s => s.ReconcilePendingAsync(DateTime.UtcNow.AddMinutes(-5), DateTime.UtcNow.AddHours(-48)));
+
+        Assert.Equal([("pi_test_1", "refund:pi_test_1")], _gateway.Refunds);
+        await using var db = CreateContext();
+        Assert.Equal(PaymentStatus.Refunded, (await db.Payments.SingleAsync()).Status);
+        Assert.Equal(SubscriptionStatus.Cancelled, (await db.Subscriptions.SingleAsync()).Status);
+        Assert.Contains(db.Notifications, x => x.Type == NotificationType.PaymentRefunded);
+    }
+
+    [Theory]
+    [InlineData(-1, "succeeded", PaymentStatus.Pending)]                 // premlado: normalan confirm još može stići
+    [InlineData(-60 * 49, "succeeded", PaymentStatus.Pending)]           // izvan prozora (napušteno)
+    [InlineData(-10, "requires_payment_method", PaymentStatus.Pending)]  // još nije plaćeno
+    [InlineData(-10, "processing", PaymentStatus.Pending)]
+    [InlineData(-10, "canceled", PaymentStatus.Failed)]
+    public async Task Reconcile_OnlyAppliesChargedPaymentsInsideTheWindow(int createdMinutesAgo, string stripeStatus, PaymentStatus expected)
+    {
+        await UpdateAsync((_, payment) => payment.CreatedAt = DateTime.UtcNow.AddMinutes(createdMinutesAgo));
+        SetIntentStatus("pi_test_1", stripeStatus);
+
+        var applied = await WithService(s => s.ReconcilePendingAsync(DateTime.UtcNow.AddMinutes(-5), DateTime.UtcNow.AddHours(-48)));
+
+        Assert.Equal(0, applied);
+        await using var db = CreateContext();
+        Assert.Equal(expected, (await db.Payments.SingleAsync()).Status);
+        Assert.Equal(SubscriptionStatus.PendingPayment, (await db.Subscriptions.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task Reconcile_WhenStripeIsNotConfigured_DoesNothing()
+    {
+        _gateway.IsConfigured = false;
+        await UpdateAsync((_, payment) => payment.CreatedAt = DateTime.UtcNow.AddMinutes(-10));
+        SetIntentStatus("pi_test_1", "succeeded");
+
+        Assert.Equal(0, await WithService(s => s.ReconcilePendingAsync(DateTime.UtcNow.AddMinutes(-5), DateTime.UtcNow.AddHours(-48))));
+
+        await using var db = CreateContext();
+        Assert.Equal(PaymentStatus.Pending, (await db.Payments.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task LifecycleRun_AppliesUnconfirmedRenewalBeforeExpiringTheSubscription()
+    {
+        // Produženje plaćeno tik prije isteka, confirm izgubljen: usklađivanje mora ići prije isteka pretplate.
+        var now = DateTime.UtcNow;
+        await UpdateAsync((subscription, payment) =>
+        {
+            subscription.Status = SubscriptionStatus.Active;
+            subscription.AcceptedAt = subscription.StartDate = now.AddDays(-30);
+            subscription.EndDate = now.AddMinutes(-1);
+            payment.Purpose = PaymentPurpose.Renewal;
+            payment.CreatedAt = now.AddMinutes(-10);
+        });
+        _gateway.Intents["pi_test_1"] = FakePaymentGateway.Intent("pi_test_1", "succeeded", _subscriptionId, PaymentPurpose.Renewal, Price);
+
+        await using var db = CreateContext();
+        var lifecycle = new LifecycleOptions
+        {
+            SubscriptionPeriodDays = 30, ExpiringReminderDays = 3, PlanMissingAfterHours = 48, PlanMissingRepeatHours = 24,
+            InactivityDays = 7, InactivityRepeatDays = 7, PaymentReconcileAfterMinutes = 5, PaymentReconcileWindowHours = 48
+        };
+        var processor = new SubscriptionLifecycleProcessor(db, CreateWorkflow(db), new Infrastructure.Services.Notifications.NotificationSender(db),
+            CreateService(db), Options.Create(lifecycle), NullLogger<SubscriptionLifecycleProcessor>.Instance);
+
+        var result = await processor.RunAsync(now);
+
+        Assert.Equal((1, 0), (result.PaymentsReconciled, result.Expired));
+        await using var check = CreateContext();
+        var subscription = await check.Subscriptions.SingleAsync();
+        Assert.Equal(SubscriptionStatus.Active, subscription.Status);
+        Assert.True(subscription.EndDate > now.AddDays(29), $"EndDate {subscription.EndDate:O}");
+        Assert.Equal(PaymentStatus.Succeeded, (await check.Payments.SingleAsync()).Status);
+        Assert.Empty(_gateway.Refunds);
+    }
+
+    private async Task UpdateAsync(Action<Subscription, Payment> change)
+    {
+        await using var db = CreateContext();
+        var payment = await db.Payments.Include(x => x.Subscription).SingleAsync();
+        change(payment.Subscription, payment);
+        await db.SaveChangesAsync();
     }
 
     private Task<PaymentIntentDto> CreateIntentAsync() =>
@@ -197,15 +360,19 @@ public sealed class PaymentServiceTests : IDisposable
 
     private PaymentService CreateService(GoBeyondDbContext db)
     {
-        var workflow = new SubscriptionWorkflow(new Infrastructure.Services.Notifications.NotificationSender(db), _gateway,
-            Options.Create(new LifecycleOptions { SubscriptionPeriodDays = 30 }), NullLogger<SubscriptionWorkflow>.Instance);
+        var workflow = CreateWorkflow(db);
         var subscriptions = new SubscriptionService(db, workflow, _gateway);
         return new PaymentService(db, _gateway, workflow, subscriptions, NullLogger<PaymentService>.Instance);
     }
 
+    private SubscriptionWorkflow CreateWorkflow(GoBeyondDbContext db) =>
+        new(new Infrastructure.Services.Notifications.NotificationSender(db), _gateway,
+            Options.Create(new LifecycleOptions { SubscriptionPeriodDays = 30 }), NullLogger<SubscriptionWorkflow>.Instance);
+
     private void SetIntentStatus(string id, string status) => _gateway.Intents[id] = _gateway.Intents[id] with { Status = status };
 
-    private static string WebhookPayload(string type, string intentId, int subscriptionId, string purpose, long amount, string currency) =>
+    private static string WebhookPayload(string type, string intentId, int subscriptionId, string purpose, long amount, string currency,
+        string status = "succeeded") =>
         System.Text.Json.JsonSerializer.Serialize(new
         {
             type,
@@ -213,7 +380,7 @@ public sealed class PaymentServiceTests : IDisposable
             {
                 @object = new
                 {
-                    id = intentId, @object = "payment_intent", status = "succeeded", amount, currency,
+                    id = intentId, @object = "payment_intent", status, amount, currency,
                     metadata = new Dictionary<string, string> { ["subscriptionId"] = subscriptionId.ToString(), ["purpose"] = purpose }
                 }
             }
@@ -248,7 +415,8 @@ public sealed class PaymentServiceTests : IDisposable
         };
         var subscription = new Subscription
         {
-            ClientProfile = client, MentorProfile = mentor, Status = SubscriptionStatus.PendingPayment, Price = Price, Currency = "usd"
+            ClientProfile = client, MentorProfile = mentor, Status = SubscriptionStatus.PendingPayment, Price = Price, Currency = "usd",
+            CreatedAt = SubscriptionCreatedAt
         };
         var payment = new Payment
         {

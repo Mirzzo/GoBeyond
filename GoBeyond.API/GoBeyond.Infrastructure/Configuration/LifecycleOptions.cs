@@ -18,4 +18,13 @@ public sealed class LifecycleOptions
 
     /// <summary>Najviše jedna PlanUpdated obavijest po planu u ovom intervalu.</summary>
     public int PlanUpdateNotificationThrottleMinutes { get; set; }
+
+    /// <summary>
+    /// Usklađivanje uplata bez webhook-a: Pending uplata starija od ovoliko minuta provjerava se na Stripe-u
+    /// (normalan tok PaymentSheet → confirm traje nekoliko sekundi).
+    /// </summary>
+    public int PaymentReconcileAfterMinutes { get; set; }
+
+    /// <summary>Pending uplate starije od ovoliko sati se više ne provjeravaju (napušteni PaymentIntent-i se ne ispituju vječno).</summary>
+    public int PaymentReconcileWindowHours { get; set; }
 }

@@ -13,6 +13,10 @@ using Microsoft.AspNetCore.Http.Features;
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
+// Lokalno pokretanje (dotnet run / Visual Studio) čita root .env kao i docker-compose; već postavljene
+// environment varijable (Docker, launchSettings) imaju prednost. Mora biti prije CreateBuilder.
+var dotEnv = DotEnvFile.Load();
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Jedini izvor konfiguracije: appsettings.Shared.json (pregaziv environment varijablama / .env).
@@ -36,6 +40,10 @@ builder.Services.AddGoBeyondAuthentication(builder.Configuration);
 builder.Services.AddGoBeyondSwagger();
 
 var app = builder.Build();
+
+if (dotEnv.Path is not null)
+    app.Logger.LogInformation("Loaded {Loaded} setting(s) from {Path}; {Skipped} were already set in the environment.",
+        dotEnv.Loaded, dotEnv.Path, dotEnv.Skipped);
 
 await app.InitializeDatabaseAsync();
 

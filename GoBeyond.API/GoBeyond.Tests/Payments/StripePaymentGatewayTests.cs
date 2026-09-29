@@ -72,18 +72,69 @@ public class StripePaymentGatewayTests
         Assert.Empty(_handler.Requests);
     }
 
+    [Fact]
+    public async Task Refund_WhenChargeWasAlreadyRefunded_IsTreatedAsDone()
+    {
+        // Stvarni Stripe odgovor (test mod) za povrat već vraćene naplate sa novim Idempotency-Key-om.
+        _handler.Respond(HttpStatusCode.BadRequest, StripeError("invalid_request_error", "charge_already_refunded"));
+
+        await _gateway.RefundAsync("pi_123", "refund:pi_123", CancellationToken.None);
+
+        Assert.Single(_handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("idempotency_error", null)]                           // isti ključ sa drugim parametrima
+    [InlineData("invalid_request_error", "charge_not_refundable")]
+    [InlineData("api_error", null)]
+    public async Task Refund_WhenStripeRejectsForAnotherReason_Throws(string type, string? code)
+    {
+        _handler.Respond(HttpStatusCode.BadRequest, StripeError(type, code));
+
+        var error = await Assert.ThrowsAsync<GoBeyond.Core.Exceptions.ValidationException>(() =>
+            _gateway.RefundAsync("pi_123", "refund:pi_123", CancellationToken.None));
+
+        Assert.StartsWith("Stripe nije prihvatio zahtjev.", error.Message);
+    }
+
+    [Fact]
+    public async Task GetPaymentIntent_DoesNotTolerateChargeAlreadyRefunded()
+    {
+        _handler.Respond(HttpStatusCode.BadRequest, StripeError("invalid_request_error", "charge_already_refunded"));
+
+        await Assert.ThrowsAsync<GoBeyond.Core.Exceptions.ValidationException>(() =>
+            _gateway.GetPaymentIntentAsync("pi_123", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Refund_WithNonJsonErrorBody_Throws()
+    {
+        _handler.Respond(HttpStatusCode.BadGateway, "<html>Bad gateway</html>");
+
+        await Assert.ThrowsAsync<GoBeyond.Core.Exceptions.ValidationException>(() =>
+            _gateway.RefundAsync("pi_123", "refund:pi_123", CancellationToken.None));
+    }
+
+    private static string StripeError(string type, string? code) =>
+        System.Text.Json.JsonSerializer.Serialize(new { error = new { type, code, message = "Stripe error." } });
+
     private sealed record CapturedRequest(HttpMethod Method, string Url, string? IdempotencyKey, string Body);
 
     private sealed class RecordingHandler : HttpMessageHandler
     {
+        private HttpStatusCode _status = HttpStatusCode.OK;
+        private string _body = IntentJson;
+
         public List<CapturedRequest> Requests { get; } = [];
+
+        public void Respond(HttpStatusCode status, string body) => (_status, _body) = (status, body);
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
             var key = request.Headers.TryGetValues("Idempotency-Key", out var values) ? values.Single() : null;
             Requests.Add(new CapturedRequest(request.Method, request.RequestUri!.ToString(), key, body));
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(IntentJson, Encoding.UTF8, "application/json") };
+            return new HttpResponseMessage(_status) { Content = new StringContent(_body, Encoding.UTF8, "application/json") };
         }
     }
 }

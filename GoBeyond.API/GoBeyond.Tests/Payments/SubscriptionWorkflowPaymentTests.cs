@@ -82,7 +82,7 @@ public class SubscriptionWorkflowPaymentTests
         Assert.Equal(PaymentStatus.Refunded, payment.Status);
         Assert.Equal(Now, payment.RefundedAt);
         Assert.Equal(status, payment.Subscription.Status); // pretplata se ne mijenja
-        Assert.Equal([("pi_test_1", "refund:7")], _gateway.Refunds);
+        Assert.Equal([("pi_test_1", "refund:pi_test_1")], _gateway.Refunds);
         var notification = Assert.Single(_notifications.Sent);
         Assert.Equal((11, NotificationType.PaymentRefunded, true), (notification.UserId, notification.Type, notification.Email));
         Assert.Contains("vraćen", notification.Body);
@@ -116,7 +116,19 @@ public class SubscriptionWorkflowPaymentTests
         _gateway.FailRefunds = false;
         Assert.True(await _workflow.RetryPendingRefundAsync(payment, Now, CancellationToken.None));
         Assert.Equal(PaymentStatus.Refunded, payment.Status);
-        Assert.Equal([("pi_test_1", "refund:7")], _gateway.Refunds);
+        Assert.Equal([("pi_test_1", "refund:pi_test_1")], _gateway.Refunds);
+    }
+
+    [Fact]
+    public void RefundIdempotencyKey_UsesPaymentIntentIdNotDatabaseId()
+    {
+        // Ista uplata (Id 7) u drugoj bazi ima drugi PaymentIntent - ključ se ne smije ponoviti.
+        var here = PaymentFor(SubscriptionStatus.AwaitingMentor, PaymentPurpose.Initial, intentId: "pi_A");
+        var afterDatabaseReset = PaymentFor(SubscriptionStatus.AwaitingMentor, PaymentPurpose.Initial, intentId: "pi_B");
+
+        Assert.Equal(here.Id, afterDatabaseReset.Id);
+        Assert.Equal("refund:pi_A", SubscriptionWorkflow.RefundIdempotencyKey(here));
+        Assert.NotEqual(SubscriptionWorkflow.RefundIdempotencyKey(here), SubscriptionWorkflow.RefundIdempotencyKey(afterDatabaseReset));
     }
 
     [Fact]

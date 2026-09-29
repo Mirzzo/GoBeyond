@@ -3,13 +3,15 @@ using GoBeyond.Infrastructure.Common;
 using GoBeyond.Infrastructure.Configuration;
 using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Services.Notifications;
+using GoBeyond.Infrastructure.Services.Payments;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace GoBeyond.Infrastructure.Services.Subscriptions;
 
-public sealed record LifecycleRunResult(int Expired, int ExpiringReminders, int PlanMissingReminders, int InactivityReminders, int RefundsCompleted);
+public sealed record LifecycleRunResult(int PaymentsReconciled, int Expired, int ExpiringReminders, int PlanMissingReminders,
+    int InactivityReminders, int RefundsCompleted);
 
 public interface ISubscriptionLifecycleProcessor
 {
@@ -24,20 +26,25 @@ public sealed class SubscriptionLifecycleProcessor(
     GoBeyondDbContext db,
     ISubscriptionWorkflow workflow,
     INotificationSender notifications,
+    IPaymentService payments,
     IOptions<LifecycleOptions> options,
     ILogger<SubscriptionLifecycleProcessor> logger) : ISubscriptionLifecycleProcessor
 {
     public async Task<LifecycleRunResult> RunAsync(DateTime now, CancellationToken cancellationToken = default)
     {
         var settings = options.Value;
+        // Usklađivanje uplata ide prvo: produženje plaćeno tik prije isteka (a nepotvrđeno) mora produžiti
+        // pretplatu prije nego je ExpireAsync proglasi isteklom (inače bi uplata bila vraćena umjesto primijenjena).
         var result = new LifecycleRunResult(
+            await payments.ReconcilePendingAsync(now.AddMinutes(-settings.PaymentReconcileAfterMinutes),
+                now.AddHours(-settings.PaymentReconcileWindowHours), cancellationToken),
             await ExpireAsync(now, cancellationToken),
             await RemindExpiringAsync(now, settings, cancellationToken),
             await RemindMissingPlansAsync(now, settings, cancellationToken),
             await RemindInactiveClientsAsync(now, settings, cancellationToken),
             await RetryPendingRefundsAsync(now, cancellationToken));
 
-        if (result != new LifecycleRunResult(0, 0, 0, 0, 0))
+        if (result != new LifecycleRunResult(0, 0, 0, 0, 0, 0))
             logger.LogInformation("Subscription lifecycle: {Result}", result);
         return result;
     }

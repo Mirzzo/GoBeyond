@@ -17,6 +17,12 @@ public interface IPaymentService
     Task<PaymentIntentDto> CreateIntentAsync(int clientUserId, CreatePaymentIntentRequest request, CancellationToken cancellationToken = default);
     Task<SubscriptionDetailDto> ConfirmAsync(int clientUserId, int paymentId, CancellationToken cancellationToken = default);
     Task HandleWebhookAsync(string payload, string signatureHeader, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Usklađivanje sa Stripe-om bez webhook-a: Pending uplate kreirane između <paramref name="createdAfter"/> i
+    /// <paramref name="createdBefore"/> provjeravaju se na Stripe-u. Vraća broj primijenjenih (ili automatski vraćenih) uplata.
+    /// </summary>
+    Task<int> ReconcilePendingAsync(DateTime createdBefore, DateTime createdAfter, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -95,8 +101,7 @@ public sealed class PaymentService(
         }
 
         var attempt = subscription.Payments.Count(x => x.Purpose == purpose) + 1;
-        var idempotencyKey = string.Create(CultureInfo.InvariantCulture,
-            $"create-intent:{subscription.Id}:{purpose}:{attempt}:{amountMinor}");
+        var idempotencyKey = CreateIntentIdempotencyKey(subscription, purpose, attempt, amountMinor);
         var intent = await gateway.CreatePaymentIntentAsync(subscription.Price, subscription.ClientProfile.User.Email,
             new Dictionary<string, string>
             {
@@ -181,12 +186,74 @@ public sealed class PaymentService(
             case "payment_intent.succeeded" when payment.Status is PaymentStatus.Pending or PaymentStatus.Failed:
                 await ApplySuccessAsync(payment, intent, cancellationToken);
                 break;
-            case "payment_intent.payment_failed" or "payment_intent.canceled" when payment.Status == PaymentStatus.Pending:
+            case "payment_intent.canceled" when payment.Status == PaymentStatus.Pending:
                 payment.Status = PaymentStatus.Failed;
                 await db.SaveChangesAsync(cancellationToken);
                 break;
+            case "payment_intent.payment_failed":
+                // Neuspio pokušaj (npr. odbijena kartica): Stripe vraća PaymentIntent u requires_payment_method i on se
+                // može ponovo platiti, pa uplata ostaje Pending i create-intent ga ponovo koristi (isto kao bez webhook-a).
+                // Da se ovdje označi Failed, sljedeći create-intent bi otvorio drugi PaymentIntent, a stari bi ostao plativ.
+                logger.LogInformation("Payment attempt for PaymentIntent {IntentId} failed (status {Status}); payment {PaymentId} stays {PaymentStatus}.",
+                    intent.Id, intent.Status, payment.Id, payment.Status);
+                break;
         }
     }
+
+    /// <summary>
+    /// Pokriva slučaj kad je kartica naplaćena, a potvrda nikad nije stigla (aplikacija ugašena ili prekid mreže prije
+    /// POST confirm, klijent otkazao pretplatu prije potvrde, a webhook nije podešen). Uspješna uplata se primjenjuje
+    /// istom provjerom kao confirm (ili automatski vraća ako se pretplata u međuvremenu promijenila), a otkazan
+    /// PaymentIntent postaje Failed. Greška jedne uplate (npr. Stripe nedostupan) ne zaustavlja ostale.
+    /// </summary>
+    public async Task<int> ReconcilePendingAsync(DateTime createdBefore, DateTime createdAfter, CancellationToken cancellationToken = default)
+    {
+        if (!gateway.IsConfigured) return 0;
+
+        var pending = await PaymentQuery()
+            .Where(x => x.Status == PaymentStatus.Pending && x.CreatedAt <= createdBefore && x.CreatedAt >= createdAfter &&
+                        x.StripePaymentIntentId.StartsWith("pi_"))
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        var applied = 0;
+        foreach (var payment in pending)
+        {
+            try
+            {
+                var intent = await gateway.GetPaymentIntentAsync(payment.StripePaymentIntentId, cancellationToken);
+                if (intent.Status == "succeeded")
+                {
+                    if (await ApplySuccessAsync(payment, intent, cancellationToken))
+                    {
+                        applied++;
+                        logger.LogWarning("Payment {PaymentId} succeeded on Stripe without confirm/webhook; processed by reconciliation.", payment.Id);
+                    }
+                }
+                else if (intent.Status == "canceled")
+                {
+                    payment.Status = PaymentStatus.Failed;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch (ValidationException ex)
+            {
+                logger.LogWarning("Reconciliation of payment {PaymentId} skipped: {Reason}", payment.Id, ex.Message);
+            }
+        }
+        return applied;
+    }
+
+    /// <summary>
+    /// Idempotency-Key za kreiranje PaymentIntent-a. Isti pokušaj iste pretplate uvijek daje isti ključ (ponovljen ili
+    /// istovremen zahtjev vraća isti PaymentIntent), a vrijeme kreiranja pretplate (100 ns) čini ključ jedinstvenim i
+    /// izvan ove baze: Stripe ključeve pamti 24 h po Stripe nalogu, a Id pretplate se ponavlja nakon resetovanja baze
+    /// ili na drugoj instalaciji sa istim Stripe ključevima. Bez toga bi Stripe odbio zahtjev (idempotency_error)
+    /// ili vratio tuđi, možda već plaćeni PaymentIntent.
+    /// </summary>
+    public static string CreateIntentIdempotencyKey(Subscription subscription, PaymentPurpose purpose, int attempt, long amountMinor) =>
+        string.Create(CultureInfo.InvariantCulture,
+            $"create-intent:{subscription.Id}:{subscription.CreatedAt:yyyyMMdd'T'HHmmssfffffff}:{purpose}:{attempt}:{amountMinor}");
 
     /// <summary>Provjerava da Stripe PaymentIntent pripada ovoj uplati (metadata, iznos i valuta). Vraća opis razlike ili null.</summary>
     public static string? FindMismatch(PaymentIntentInfo intent, Payment payment)
@@ -208,9 +275,10 @@ public sealed class PaymentService(
 
     /// <summary>
     /// Provjeri PaymentIntent, pa atomski "preuzmi" uplatu (Pending/Failed → Succeeded samo jednom), tako da
-    /// confirm i webhook koji stignu istovremeno ne mogu dvaput primijeniti istu uplatu.
+    /// confirm, webhook i usklađivanje koji stignu istovremeno ne mogu dvaput primijeniti istu uplatu.
+    /// Vraća false ako je uplatu već obradio neko drugi.
     /// </summary>
-    private async Task ApplySuccessAsync(Payment payment, PaymentIntentInfo intent, CancellationToken cancellationToken)
+    private async Task<bool> ApplySuccessAsync(Payment payment, PaymentIntentInfo intent, CancellationToken cancellationToken)
     {
         if (FindMismatch(intent, payment) is { } field)
         {
@@ -224,11 +292,12 @@ public sealed class PaymentService(
         var claimed = await db.Payments
             .Where(x => x.Id == payment.Id && (x.Status == PaymentStatus.Pending || x.Status == PaymentStatus.Failed))
             .ExecuteUpdateAsync(x => x.SetProperty(p => p.Status, PaymentStatus.Succeeded).SetProperty(p => p.PaidAt, now), cancellationToken);
-        if (claimed == 0) return;
+        if (claimed == 0) return false;
 
         await workflow.ApplySuccessfulPaymentAsync(payment, now, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        return true;
     }
 
     private IQueryable<Payment> PaymentQuery() => db.Payments

@@ -21,6 +21,12 @@ namespace GoBeyond.Tests.TestInfrastructure;
 /// </summary>
 public sealed class GoBeyondApiFactory : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// Program.cs učitava root .env (lokalni Stripe ključevi i sl.). Testovi ga ne smiju vidjeti, pa se to isključuje
+    /// prije prvog pokretanja Program-a (statički konstruktor se izvršava prije kreiranja bilo koje instance).
+    /// </summary>
+    static GoBeyondApiFactory() => Environment.SetEnvironmentVariable(GoBeyond.Contracts.Configuration.DotEnvFile.SkipVariable, "1");
+
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
 
     public string PrivateRoot { get; } = Path.Combine(Path.GetTempPath(), "gobeyond-tests-" + Guid.NewGuid().ToString("N"));

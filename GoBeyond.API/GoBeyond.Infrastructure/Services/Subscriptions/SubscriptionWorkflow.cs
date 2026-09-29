@@ -234,16 +234,23 @@ public sealed class SubscriptionWorkflow(
     }
 
     /// <summary>
-    /// Pravi Stripe PaymentIntent ("pi_...") se vraća preko Stripe Refund API-ja (Idempotency-Key "refund:{paymentId}",
-    /// pa ponovljen pokušaj ne vraća novac dvaput). Seed (demo) uplate nikad nisu naplaćene preko Stripe-a
-    /// ("seed_pi_..."), pa se za njih samo evidentira povrat.
+    /// Idempotency-Key povrata: "refund:{PaymentIntent id}". Id PaymentIntent-a je jedinstven na Stripe nalogu, pa ključ
+    /// važi i nakon resetovanja baze ili na drugoj instalaciji sa istim ključevima (Id uplate iz baze se tada ponavlja,
+    /// a Stripe bi isti ključ sa drugim PaymentIntent-om odbio kao idempotency_error).
+    /// </summary>
+    public static string RefundIdempotencyKey(Payment payment) => $"refund:{payment.StripePaymentIntentId}";
+
+    /// <summary>
+    /// Pravi Stripe PaymentIntent ("pi_...") se vraća preko Stripe Refund API-ja (Idempotency-Key iz
+    /// <see cref="RefundIdempotencyKey"/>, pa ponovljen pokušaj ne vraća novac dvaput). Seed (demo) uplate nikad nisu
+    /// naplaćene preko Stripe-a ("seed_pi_..."), pa se za njih samo evidentira povrat.
     /// </summary>
     private async Task RefundAsync(Payment payment, DateTime now, CancellationToken cancellationToken)
     {
         if (!RefundableStatuses.Contains(payment.Status)) return;
 
         if (payment.StripePaymentIntentId.StartsWith("pi_", StringComparison.Ordinal))
-            await paymentGateway.RefundAsync(payment.StripePaymentIntentId, $"refund:{payment.Id}", cancellationToken);
+            await paymentGateway.RefundAsync(payment.StripePaymentIntentId, RefundIdempotencyKey(payment), cancellationToken);
 
         payment.Status = PaymentStatus.Refunded;
         payment.RefundedAt = now;
