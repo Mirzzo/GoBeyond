@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using GoBeyond.Core.Enums;
 using GoBeyond.Infrastructure.Common;
 using GoBeyond.Infrastructure.Configuration;
@@ -52,8 +53,8 @@ public sealed class SubscriptionLifecycleProcessor(
     }
 
     /// <summary>
-    /// Greška jednog koraka (npr. podsjetnik za pretplatu koju je klijent upravo otkazao: status je concurrency token, pa
-    /// snimanje ne uspijeva) se loguje, a ostali koraci se ipak izvršavaju; korak se ponavlja u sljedećem ciklusu.
+    /// Greška jednog koraka (npr. prekid veze sa bazom) se loguje, a ostali koraci se ipak izvršavaju; korak se ponavlja u
+    /// sljedećem ciklusu.
     /// </summary>
     private async Task<int> StepAsync(string name, Func<Task<int>> step, CancellationToken cancellationToken)
     {
@@ -128,47 +129,75 @@ public sealed class SubscriptionLifecycleProcessor(
     }
 
     /// <summary>Podsjetnik klijentu N dana prije isteka (jednom po periodu; obnova resetuje podsjetnik).</summary>
-    private async Task<int> RemindExpiringAsync(DateTime now, LifecycleOptions settings, CancellationToken cancellationToken)
+    private Task<int> RemindExpiringAsync(DateTime now, LifecycleOptions settings, CancellationToken cancellationToken)
     {
         var limit = now.AddDays(settings.ExpiringReminderDays);
-        var expiring = await SubscriptionsWithUsers()
-            .Where(x => x.Status == SubscriptionStatus.Active && x.ExpiryReminderSentAt == null &&
-                        x.EndDate != null && x.EndDate > now && x.EndDate <= limit)
-            .ToListAsync(cancellationToken);
-
-        foreach (var subscription in expiring)
-        {
-            subscription.ExpiryReminderSentAt = now;
-            notifications.Notify(subscription.ClientProfile.User, NotificationType.SubscriptionExpiring, "Pretplata uskoro ističe",
-                $"Saradnja sa mentorom {subscription.MentorProfile.User.FullName} ističe {DomainTexts.Date(subscription.EndDate, settings.TimeZoneId)} " +
-                "Produžite pretplatu u sekciji \"Pretplata\" kako biste zadržali svoj plan.",
-                sendEmail: true);
-        }
-        await db.SaveChangesAsync(cancellationToken);
-        return expiring.Count;
+        return RemindEachAsync(
+            x => x.Status == SubscriptionStatus.Active && x.ExpiryReminderSentAt == null &&
+                 x.EndDate != null && x.EndDate > now && x.EndDate <= limit,
+            subscription =>
+            {
+                subscription.ExpiryReminderSentAt = now;
+                notifications.Notify(subscription.ClientProfile.User, NotificationType.SubscriptionExpiring, "Pretplata uskoro ističe",
+                    $"Saradnja sa mentorom {subscription.MentorProfile.User.FullName} ističe {DomainTexts.Date(subscription.EndDate, settings.TimeZoneId)} " +
+                    "Produžite pretplatu u sekciji \"Pretplata\" kako biste zadržali svoj plan.",
+                    sendEmail: true);
+            },
+            cancellationToken);
     }
 
     /// <summary>Izostanak plana: aktivna saradnja duže od N sati bez objavljenog plana (najviše jednom u M sati).</summary>
-    private async Task<int> RemindMissingPlansAsync(DateTime now, LifecycleOptions settings, CancellationToken cancellationToken)
+    private Task<int> RemindMissingPlansAsync(DateTime now, LifecycleOptions settings, CancellationToken cancellationToken)
     {
         var acceptedBefore = now.AddHours(-settings.PlanMissingAfterHours);
         var repeatBefore = now.AddHours(-settings.PlanMissingRepeatHours);
-        var missing = await SubscriptionsWithUsers()
-            .Where(x => x.Status == SubscriptionStatus.Active && x.AcceptedAt != null && x.AcceptedAt <= acceptedBefore &&
-                        (x.TrainingPlan == null || x.TrainingPlan.Status == TrainingPlanStatus.Draft) &&
-                        (x.PlanMissingReminderSentAt == null || x.PlanMissingReminderSentAt <= repeatBefore))
-            .ToListAsync(cancellationToken);
+        return RemindEachAsync(
+            x => x.Status == SubscriptionStatus.Active && x.AcceptedAt != null && x.AcceptedAt <= acceptedBefore &&
+                 (x.TrainingPlan == null || x.TrainingPlan.Status == TrainingPlanStatus.Draft) &&
+                 (x.PlanMissingReminderSentAt == null || x.PlanMissingReminderSentAt <= repeatBefore),
+            subscription =>
+            {
+                subscription.PlanMissingReminderSentAt = now;
+                notifications.Notify(subscription.MentorProfile.User, NotificationType.PlanMissing, "Klijent čeka trening plan",
+                    $"Saradnja sa klijentom {subscription.ClientProfile.User.FullName} je aktivna od {DomainTexts.Date(subscription.AcceptedAt, settings.TimeZoneId)}, " +
+                    "a plan još nije objavljen. Izradite i objavite plan u sekciji \"Zahtjevi za saradnju\".",
+                    sendEmail: true);
+            },
+            cancellationToken);
+    }
 
-        foreach (var subscription in missing)
+    /// <summary>
+    /// Podsjetnik za svaku pretplatu ide u njenoj transakciji nad zaključanim redom, a uslov se nakon zaključavanja
+    /// provjerava ponovo: istovremeno produženje (novi EndDate, resetovan podsjetnik) ili otkazivanje se tako ne pregazi i
+    /// ne šalje se zastario datum. Greška jedne pretplate ne zaustavlja ostale; ponavlja se u sljedećem ciklusu.
+    /// </summary>
+    private async Task<int> RemindEachAsync(Expression<Func<Core.Entities.Subscription, bool>> due,
+        Action<Core.Entities.Subscription> remind, CancellationToken cancellationToken)
+    {
+        var candidates = await db.Subscriptions.AsNoTracking().Where(due).Select(x => x.Id).ToListAsync(cancellationToken);
+
+        var reminded = 0;
+        foreach (var subscriptionId in candidates)
         {
-            subscription.PlanMissingReminderSentAt = now;
-            notifications.Notify(subscription.MentorProfile.User, NotificationType.PlanMissing, "Klijent čeka trening plan",
-                $"Saradnja sa klijentom {subscription.ClientProfile.User.FullName} je aktivna od {DomainTexts.Date(subscription.AcceptedAt, settings.TimeZoneId)}, " +
-                "a plan još nije objavljen. Izradite i objavite plan u sekciji \"Zahtjevi za saradnju\".",
-                sendEmail: true);
+            try
+            {
+                await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+                await db.LockSubscriptionAsync(subscriptionId, cancellationToken);
+                var subscription = await SubscriptionsWithUsers().Where(due).FirstOrDefaultAsync(x => x.Id == subscriptionId, cancellationToken);
+                if (subscription is null) continue;
+
+                remind(subscription);
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                reminded++;
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Reminder for subscription {SubscriptionId} failed; it will be retried in the next run.", subscriptionId);
+                db.ChangeTracker.Clear();
+            }
         }
-        await db.SaveChangesAsync(cancellationToken);
-        return missing.Count;
+        return reminded;
     }
 
     /// <summary>Neaktivnost: klijent bez aktivnosti N dana (najviše jedna obavijest u M dana).</summary>

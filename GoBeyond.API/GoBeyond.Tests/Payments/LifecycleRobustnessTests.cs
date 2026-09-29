@@ -1,10 +1,9 @@
-using GoBeyond.Core.Entities;
 using GoBeyond.Core.Enums;
 using GoBeyond.Core.Exceptions;
 using GoBeyond.Infrastructure.Services.Payments;
 using GoBeyond.Tests.Subscriptions;
+using GoBeyond.Tests.TestInfrastructure;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace GoBeyond.Tests.Payments;
 
@@ -145,13 +144,12 @@ public sealed class LifecycleRobustnessTests : IDisposable
     [Fact]
     public async Task ReminderConflictingWithAConcurrentCancel_DoesNotSkipTheRemainingSteps()
     {
-        // Klijent otkazuje pretplatu baš dok ciklus snima podsjetnik o isteku: status je concurrency token, pa snimanje
-        // podsjetnika ne uspijeva. Ostali koraci (povrati) se ipak izvršavaju, a otkazivanje ostaje.
+        // Klijent otkazuje pretplatu nakon što ju je ciklus odabrao za podsjetnik o isteku, a prije nego je podsjetnik
+        // snimljen. Podsjetnik se ne šalje, ostali koraci (povrati) se ipak izvršavaju, a otkazivanje ostaje.
         var expiring = await _db.AddSubscriptionAsync(SubscriptionStatus.Active, x => x.EndDate = DateTime.UtcNow.AddDays(2));
         var cancelled = await _db.AddSubscriptionAsync(SubscriptionStatus.Cancelled, clientProfileId: _db.SecondClientProfileId);
         await _db.AddPaymentAsync(cancelled, "pi_refund", PaymentStatus.RefundPending, "succeeded");
-        var concurrentCancel = new BeforeSaveInterceptor(context =>
-            context.ChangeTracker.Entries<Subscription>().Any(x => x.Entity.Id == expiring && x.Property(s => s.ExpiryReminderSentAt).IsModified),
+        var concurrentCancel = new AfterQueryInterceptor("\"ExpiryReminderSentAt\" IS NULL",
             () => _db.RunAsync(db => db.Subscriptions.Where(x => x.Id == expiring)
                 .ExecuteUpdateAsync(x => x.SetProperty(s => s.Status, SubscriptionStatus.Cancelled))));
         await using var db = _db.CreateContext(concurrentCancel);
@@ -182,22 +180,5 @@ public sealed class LifecycleRobustnessTests : IDisposable
         Assert.Equal(1, result.RefundsCompleted);
         Assert.Equal(PaymentStatus.Refunded, Assert.Single((await _db.SubscriptionAsync(second)).Payments).Status);
         Assert.Equal(PaymentStatus.RefundPending, Assert.Single((await _db.SubscriptionAsync(first)).Payments).Status);
-    }
-
-    /// <summary>Jednom, neposredno prije snimanja koje zadovoljava uslov, izvrši "istovremenu" izmjenu na drugoj konekciji.</summary>
-    private sealed class BeforeSaveInterceptor(Func<DbContext, bool> when, Func<Task> concurrentChange) : SaveChangesInterceptor
-    {
-        public bool Fired { get; private set; }
-
-        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
-            InterceptionResult<int> result, CancellationToken cancellationToken = default)
-        {
-            if (!Fired && eventData.Context is { } context && when(context))
-            {
-                Fired = true;
-                await concurrentChange();
-            }
-            return result;
-        }
     }
 }
