@@ -70,7 +70,11 @@ public static class DomainTexts
 
     /// <summary>Iznos sa decimalnim zarezom, npr. "39,99 USD" (kao u aplikacijama i demo podacima).</summary>
     public static string Money(decimal amount, string currency) =>
-        $"{amount.ToString("0.00", CultureInfo.InvariantCulture).Replace('.', ',')} {currency.ToUpperInvariant()}";
+        $"{Number(amount, "0.00")} {currency.ToUpperInvariant()}";
+
+    /// <summary>Broj u zadanom formatu sa decimalnim zarezom, npr. ocjena 4.5 sa "0.0" daje "4,5".</summary>
+    public static string Number(IFormattable value, string format) =>
+        value.ToString(format, CultureInfo.InvariantCulture).Replace('.', ',');
 
     /// <summary>Broj godina sa ispravnim oblikom: "1 godina", "2 godine", "5 godina", "21 godina", "22 godine", "112 godina".</summary>
     public static string Years(int count) =>

@@ -1,4 +1,3 @@
-using System.Globalization;
 using GoBeyond.Core.DTOs.Mentors;
 using GoBeyond.Core.Enums;
 using GoBeyond.Core.Exceptions;
@@ -104,7 +103,7 @@ public sealed class RecommendationService(GoBeyondDbContext db, IMentorCatalogSe
             reasons.Add($"Uspješne saradnje s klijentima istog cilja ({successCount})");
 
         if (mentor.ReviewCount > 0 && mentor.AverageRating >= 4.0)
-            reasons.Add($"Visoka ocjena klijenata ({mentor.AverageRating.ToString("0.0", CultureInfo.InvariantCulture)})");
+            reasons.Add($"Visoka ocjena klijenata ({DomainTexts.Number(mentor.AverageRating, "0.0")})");
 
         if (mentor.YearsOfExperience >= 5)
             reasons.Add($"{DomainTexts.Years(mentor.YearsOfExperience)} iskustva");

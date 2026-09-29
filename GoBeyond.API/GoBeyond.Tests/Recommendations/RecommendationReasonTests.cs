@@ -10,7 +10,10 @@ using Microsoft.Data.Sqlite;
 
 namespace GoBeyond.Tests.Recommendations;
 
-/// <summary>Razlozi preporuke su rodno neutralni (i za mentoricu), a broj godina iskustva ima ispravan oblik.</summary>
+/// <summary>
+/// Razlozi preporuke su rodno neutralni (i za mentoricu), broj godina iskustva ima ispravan oblik, a ocjena decimalni zarez
+/// ("4,5", kao iznosi u tekstovima).
+/// </summary>
 public sealed class RecommendationReasonTests : IDisposable
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
@@ -19,6 +22,8 @@ public sealed class RecommendationReasonTests : IDisposable
     private readonly Gender _gender = new() { Name = "Žensko" };
     private readonly TrainingType _type = new() { Name = "Weightlifting", Description = "Utezi" };
     private readonly FitnessGoal _goal = new() { Name = "Povećanje mišićne mase" };
+    private readonly FitnessLevel _reviewerLevel = new() { Name = "Rekreativac", SortOrder = 2 };
+    private int _reviewers;
 
     public RecommendationReasonTests()
     {
@@ -60,6 +65,29 @@ public sealed class RecommendationReasonTests : IDisposable
         return client.User;
     }
 
+    /// <summary>Recenzije drugih klijenata iz završenih saradnji sa mentorom.</summary>
+    private void AddReviews(MentorProfile mentor, params int[] ratings)
+    {
+        foreach (var rating in ratings)
+        {
+            var reviewer = new ClientProfile
+            {
+                User = NewUser($"Klijent{++_reviewers}", "Recenzent", UserRole.Client), WeightKg = 70, HeightCm = 175,
+                FitnessLevel = _reviewerLevel, FitnessGoal = _goal, TrainingExperienceYears = 2
+            };
+            var subscription = new Subscription
+            {
+                ClientProfile = reviewer, MentorProfile = mentor, Status = SubscriptionStatus.Expired, Price = 20, Currency = "usd",
+                AcceptedAt = DateTime.UtcNow.AddDays(-40)
+            };
+            _db.Reviews.Add(new Review
+            {
+                Subscription = subscription, ClientProfile = reviewer, MentorProfile = mentor, Rating = rating,
+                Comment = "Odlična saradnja i jasan plan."
+            });
+        }
+    }
+
     [Fact]
     public async Task RecommendForClientAsync_ReasonsAreGenderNeutralWithCorrectYearForms()
     {
@@ -81,6 +109,31 @@ public sealed class RecommendationReasonTests : IDisposable
         Assert.DoesNotContain(reasons[novice.Id], x => x.Contains("iskustva"));
         Assert.All(reasons.Values.SelectMany(x => x), x => Assert.DoesNotContain("Specijalizovan", x));
     }
+
+    [Fact]
+    public async Task RecommendForClientAsync_RatingReasonUsesTheDecimalComma()
+    {
+        var rated = AddMentor("Lejla", "Mujić", years: 3);
+        var even = AddMentor("Selma", "Delić", years: 3);
+        var client = AddClient();
+        AddReviews(rated, 4, 5);
+        AddReviews(even, 4, 4);
+        await _db.SaveChangesAsync();
+
+        var reasons = (await _service.RecommendForClientAsync(client.Id, take: 10))
+            .ToDictionary(x => x.Mentor.MentorProfileId, x => x.Reasons);
+
+        Assert.Contains("Visoka ocjena klijenata (4,5)", reasons[rated.Id]);
+        Assert.Contains("Visoka ocjena klijenata (4,0)", reasons[even.Id]);
+        Assert.All(reasons.Values.SelectMany(x => x), x => Assert.DoesNotMatch(@"\d\.\d", x));
+    }
+
+    [Theory]
+    [InlineData(4.0, "0.0", "4,0")]
+    [InlineData(4.25, "0.0", "4,3")]
+    [InlineData(1234.5, "0.00", "1234,50")]
+    public void Number_UsesTheDecimalComma(double value, string format, string expected) =>
+        Assert.Equal(expected, DomainTexts.Number(value, format));
 
     [Theory]
     [InlineData(1, "1 godina")]
