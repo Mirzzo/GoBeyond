@@ -73,6 +73,10 @@ public sealed class TrainingPlanService(
 
     public async Task<PlanDetailDto> CreateAsync(int mentorUserId, CreatePlanRequest request, CancellationToken cancellationToken = default)
     {
+        // Kreiranje može prihvatiti zahtjev, pa se pretplata zaključava prije čitanja: istovremeno odbijanje ili otkazivanje
+        // se završi prije, a ovdje se vidi njegov rezultat (400) umjesto konflikta pri snimanju.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.LockSubscriptionAsync(request.SubscriptionId, cancellationToken);
         var subscription = await db.Subscriptions
             .Include(x => x.ClientProfile).ThenInclude(x => x.User)
             .Include(x => x.MentorProfile).ThenInclude(x => x.User)
@@ -113,6 +117,7 @@ public sealed class TrainingPlanService(
         {
             throw new ConflictException("Plan za ovu pretplatu već postoji.");
         }
+        await transaction.CommitAsync(cancellationToken);
         return PlanMapper.ToDetail(plan);
     }
 
