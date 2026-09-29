@@ -5,22 +5,13 @@ using GoBeyond.Contracts.Messages;
 namespace GoBeyond.EmailConsumer.Services;
 
 /// <summary>
-/// Gradi ključ koji <see cref="SentMessageIdStore"/> koristi da prepozna da li je email već jednom uspješno
-/// poslan (review defekt/majorna primjedba nad prethodnom verzijom BG-06 fixa).
-///
-/// Ključ NIJE samo <see cref="EmailNotificationMessage.MessageId"/> (Id reda u OutboxMessages) - taj Id se
-/// restartuje od 1 kad se baza koja ga je proizvela obriše i ponovo napravi (svježa dev/test baza, docker
-/// volume koji preživi reset baze, druga instalacija...). Da je ključ samo taj Id, trajni store bi nakon
-/// resetovanja baze i dalje "pamtio" stare Id-eve i potpuno RAZLIČIT, nov email koji slučajno dobije isti Id
-/// bi bio nečujno preskočen (acked bez slanja) - gori ishod (gubitak emaila) od rijetkog duplikata koji je
-/// BG-06 fix trebao spriječiti.
-///
-/// Zato ključ kombinuje MessageId sa <see cref="EmailNotificationMessage.CreatedAtTicks"/> (vrijeme upisa u
-/// outbox, popunjava ga OutboxDispatcher) i SHA-256 hash-em stvarnog sadržaja (EventType/RecipientEmail/
-/// Subject/Body). Pravi redelivery iste poruke sa brokera (isti bajtovi, samo isporučeni dvaput) ima identičan
-/// MessageId+CreatedAtTicks+sadržaj -> isti ključ -> prepoznaje se i ne šalje ponovo. Različita poruka koja
-/// slučajno dobije isti MessageId nakon reseta baze skoro sigurno ima drugačiji CreatedAtTicks (i/ili sadržaj)
-/// -> drugačiji ključ -> šalje se normalno.
+/// Gradi ključ koji <see cref="SentMessageIdStore"/> koristi da prepozna da li je email već poslan.
+/// <see cref="EmailNotificationMessage.MessageId"/> (Id reda u OutboxMessages) sam nije dovoljan: restartuje se
+/// od 1 kad se baza koja ga je proizvela obriše i ponovo napravi, pa bi trajni store nakon toga nečujno
+/// preskočio potpuno drugačiji email koji slučajno dobije isti Id. Zato ključ kombinuje MessageId sa
+/// <see cref="EmailNotificationMessage.CreatedAtTicks"/> i SHA-256 hash-em sadržaja (EventType/RecipientEmail/
+/// Subject/Body) - pravi redelivery iste poruke ima identičan ključ, dok drugačija poruka nakon reseta baze
+/// skoro sigurno ne.
 /// </summary>
 public static class EmailIdempotencyKey
 {

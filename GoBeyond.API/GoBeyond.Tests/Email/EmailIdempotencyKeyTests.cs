@@ -22,9 +22,9 @@ public class EmailIdempotencyKeyTests
     [Fact]
     public void For_ReturnsDifferentKey_WhenCreatedAtDiffers_EvenWithTheSameMessageId()
     {
-        // Review major defect repro: simulates a database reset. OutboxMessages restarts from Id 1, so a
-        // brand-new, unrelated email can get the SAME MessageId an old, already-sent email once had - but its
-        // CreatedAt is necessarily different (it was created after the reset).
+        // Simulates a database reset. OutboxMessages restarts from Id 1, so a brand-new, unrelated email can
+        // get the SAME MessageId an old, already-sent email once had - but its CreatedAt is necessarily
+        // different (it was created after the reset).
         var before = Message(messageId: 7301, createdAtTicks: 100);
         var after = Message(messageId: 7301, createdAtTicks: 999);
 
@@ -34,8 +34,8 @@ public class EmailIdempotencyKeyTests
     [Fact]
     public void For_ReturnsDifferentKey_WhenContentDiffers_EvenWithTheSameMessageIdAndCreatedAt()
     {
-        // Review's exact runtime repro: MessageId 7301 reused with a different recipient/subject/body/event
-        // type must NOT be treated as the same message, even if CreatedAtTicks happened to collide too.
+        // MessageId 7301 reused with a different recipient/subject/body/event type must NOT be treated as the
+        // same message, even if CreatedAtTicks happened to collide too.
         var first = Message(recipient: "rev.e1.first@example.org", subject: "dup A", body: "body A");
         var different = Message(eventType: "MentorApproved", recipient: "rev.e1.other.user@example.org",
             subject: "different email same id (after DB reset)", body: "different");
