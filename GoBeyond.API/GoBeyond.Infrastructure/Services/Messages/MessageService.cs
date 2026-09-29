@@ -66,10 +66,18 @@ public sealed class MessageService(GoBeyondDbContext db, INotificationSender not
 
     public async Task<List<MessageDto>> GetThreadAsync(int userId, UserRole role, int subscriptionId, CancellationToken cancellationToken = default)
     {
-        await EnsureAccessAsync(userId, role, subscriptionId, cancellationToken);
+        var subscription = await EnsureAccessAsync(userId, role, subscriptionId, cancellationToken);
 
         await db.Messages.Where(x => x.SubscriptionId == subscriptionId && x.SenderUserId != userId && !x.IsRead)
             .ExecuteUpdateAsync(x => x.SetProperty(m => m.IsRead, true), cancellationToken);
+
+        // NewMessage obavijest je jedna po pošiljaocu, pa je pročitana kad nijedna nit s njim nema nepročitanih poruka.
+        var otherParty = role == UserRole.Mentor ? subscription.ClientProfile.User : subscription.MentorProfile.User;
+        var unreadElsewhere = await VisibleSubscriptions(userId, role)
+            .AnyAsync(x => x.Messages.Any(m => m.SenderUserId == otherParty.Id && !m.IsRead), cancellationToken);
+        if (!unreadElsewhere)
+            await UnreadNewMessageNotifications(userId, otherParty)
+                .ExecuteUpdateAsync(x => x.SetProperty(n => n.IsRead, true), cancellationToken);
 
         return await db.Messages.AsNoTracking()
             .Where(x => x.SubscriptionId == subscriptionId)

@@ -12,7 +12,7 @@ namespace GoBeyond.Tests.Messages;
 
 /// <summary>
 /// NewMessage obavijest: naslov bez padeža ("Nova poruka: {ime}"), jedna nepročitana obavijest po pošiljaocu (i kad je
-/// postojeća u ranijem obliku).
+/// postojeća u ranijem obliku), a otvaranje niti je označava pročitanom, pa broj nepročitanih obavijesti odgovara porukama.
 /// </summary>
 public sealed class NewMessageNotificationTests : IDisposable
 {
@@ -80,6 +80,8 @@ public sealed class NewMessageNotificationTests : IDisposable
     private Task<List<Notification>> NotificationsOfAsync(User user) =>
         _db.Notifications.AsNoTracking().Where(x => x.UserId == user.Id).OrderBy(x => x.Id).ToListAsync();
 
+    private Task<int> UnreadCountAsync(User user) => new NotificationService(_db).GetUnreadCountAsync(user.Id);
+
     [Fact]
     public async Task SendAsync_TitleNamesTheSenderWithoutDecliningTheName()
     {
@@ -129,5 +131,85 @@ public sealed class NewMessageNotificationTests : IDisposable
         Assert.Equal(2, notifications.Count);
         Assert.Equal("Lejla Mujić: Poruka druge mentorice", notifications[0].Body);
         Assert.Equal("Nova poruka: Haris Mehmedović", notifications[1].Title);
+    }
+
+    [Fact]
+    public async Task GetThreadAsync_MarksTheNewMessageNotificationFromTheOtherPartyRead()
+    {
+        await MentorSendsAsync("Prva poruka");
+        await MentorSendsAsync("Druga poruka");
+        Assert.Equal(1, await UnreadCountAsync(_client));
+
+        await _service.GetThreadAsync(_client.Id, UserRole.Client, _subscription.Id);
+
+        Assert.Equal(0, await UnreadCountAsync(_client));
+        Assert.True(Assert.Single(await NotificationsOfAsync(_client)).IsRead);
+    }
+
+    [Fact]
+    public async Task GetThreadAsync_ForMentor_MarksTheClientsNewMessageNotificationRead()
+    {
+        await _service.SendAsync(_client.Id, UserRole.Client, _subscription.Id, new SendMessageRequest { Content = "Imam pitanje." });
+        Assert.Equal(1, await UnreadCountAsync(_mentor));
+
+        await _service.GetThreadAsync(_mentor.Id, UserRole.Mentor, _subscription.Id);
+
+        Assert.Equal(0, await UnreadCountAsync(_mentor));
+    }
+
+    [Theory]
+    [InlineData("Nova poruka od Haris Mehmedović", "Stara poruka")]
+    [InlineData("Nova poruka", "Haris Mehmedović: Stara poruka")]
+    public async Task GetThreadAsync_MarksAnEarlierFormatNotificationFromTheOtherPartyRead(string title, string body)
+    {
+        AddUnreadNotification(_client, title, body);
+
+        await _service.GetThreadAsync(_client.Id, UserRole.Client, _subscription.Id);
+
+        Assert.Equal(0, await UnreadCountAsync(_client));
+    }
+
+    [Fact]
+    public async Task GetThreadAsync_LeavesOtherNotificationsUnread()
+    {
+        await MentorSendsAsync("Poruka od Harisa");
+        await _service.SendAsync(_client.Id, UserRole.Client, _subscription.Id, new SendMessageRequest { Content = "Odgovor" });
+        AddUnreadNotification(_client, "Nova poruka: Lejla Mujić", "Poruka druge mentorice");
+        _db.Notifications.Add(new Notification
+        {
+            UserId = _client.Id, Type = NotificationType.PlanPublished, Title = "Trening plan je objavljen", Body = "Plan je spreman."
+        });
+        await _db.SaveChangesAsync();
+
+        await _service.GetThreadAsync(_client.Id, UserRole.Client, _subscription.Id);
+
+        var unread = (await NotificationsOfAsync(_client)).Where(x => !x.IsRead).Select(x => x.Title).ToList();
+        Assert.Equal(["Nova poruka: Lejla Mujić", "Trening plan je objavljen"], unread);
+        Assert.Equal(1, await UnreadCountAsync(_mentor));
+    }
+
+    [Fact]
+    public async Task GetThreadAsync_WhileAnotherThreadWithTheSameSenderHasUnreadMessages_KeepsTheNotificationUnread()
+    {
+        // Ranija (istekla) saradnja sa istim mentorom ima nepročitanu poruku; nova poruka stiže u aktivnu nit.
+        var expired = new Subscription
+        {
+            ClientProfileId = _subscription.ClientProfileId, MentorProfileId = _subscription.MentorProfileId,
+            Status = SubscriptionStatus.Expired, Price = 20, Currency = "usd", PaidAt = DateTime.UtcNow.AddDays(-60),
+            AcceptedAt = DateTime.UtcNow.AddDays(-60), EndDate = DateTime.UtcNow.AddDays(-30), CreatedAt = DateTime.UtcNow.AddDays(-60)
+        };
+        _db.Subscriptions.Add(expired);
+        _db.Messages.Add(new Message
+        {
+            Subscription = expired, SenderUserId = _mentor.Id, Content = "Stara poruka", SentAt = DateTime.UtcNow.AddDays(-31)
+        });
+        await _db.SaveChangesAsync();
+        await MentorSendsAsync("Nova poruka o planu");
+
+        await _service.GetThreadAsync(_client.Id, UserRole.Client, expired.Id);
+        Assert.Equal(1, await UnreadCountAsync(_client));
+
+        await _service.GetThreadAsync(_client.Id, UserRole.Client, _subscription.Id);
+        Assert.Equal(0, await UnreadCountAsync(_client));
     }
 }
