@@ -11,7 +11,7 @@ namespace GoBeyond.Infrastructure.Security;
 
 public interface IJwtTokenService
 {
-    (string Token, DateTime ExpiresAt) CreateAccessToken(User user);
+    (string Token, DateTime ExpiresAt) CreateAccessToken(User user, Guid sessionId);
     string CreateRefreshToken();
     string HashRefreshToken(string refreshToken);
 }
@@ -21,7 +21,13 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
     public const string RoleClaim = "role";
     public const string UserIdClaim = JwtRegisteredClaimNames.Sub;
 
-    public (string Token, DateTime ExpiresAt) CreateAccessToken(User user)
+    /// <summary>User.SecurityStamp u trenutku izdavanja; token bez ove tvrdnje ili sa starom vrijednošću nije važeći.</summary>
+    public const string SecurityStampClaim = "stamp";
+
+    /// <summary>RefreshToken.SessionId sesije uz koju je token izdat (promjena lozinke zadržava samo tu sesiju).</summary>
+    public const string SessionIdClaim = JwtRegisteredClaimNames.Sid;
+
+    public (string Token, DateTime ExpiresAt) CreateAccessToken(User user, Guid sessionId)
     {
         var settings = options.Value;
         var expiresAt = DateTime.UtcNow.AddMinutes(settings.AccessTokenLifetimeMinutes);
@@ -34,6 +40,8 @@ public sealed class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenSer
             new(JwtRegisteredClaimNames.UniqueName, user.Username),
             new(JwtRegisteredClaimNames.Email, user.Email),
             new(RoleClaim, user.Role.ToString()),
+            new(SecurityStampClaim, user.SecurityStamp.ToString("N")),
+            new(SessionIdClaim, sessionId.ToString("N")),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
         };
 

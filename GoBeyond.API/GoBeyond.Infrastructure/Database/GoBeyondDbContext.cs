@@ -102,6 +102,8 @@ public class GoBeyondDbContext(DbContextOptions<GoBeyondDbContext> options) : Db
             entity.Property(x => x.PhoneNumber).HasMaxLength(20);
             entity.Property(x => x.PasswordHash).HasMaxLength(200).IsRequired();
             entity.Property(x => x.ProfileImageUrl).HasMaxLength(300);
+            // Postojeći korisnici pri migraciji dobijaju nasumičnu vrijednost.
+            entity.Property(x => x.SecurityStamp).HasDefaultValueSql("NEWID()");
             entity.HasIndex(x => x.Username).IsUnique();
             entity.HasIndex(x => x.Email).IsUnique();
             entity.HasOne(x => x.Gender).WithMany().HasForeignKey(x => x.GenderId).OnDelete(DeleteBehavior.Restrict);

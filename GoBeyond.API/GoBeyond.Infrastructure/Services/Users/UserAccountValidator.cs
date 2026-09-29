@@ -13,6 +13,13 @@ public interface IUserAccountValidator
 {
     Task ValidateAccountAsync(ValidationErrorCollector errors, AccountFieldsRequest request, int? currentUserId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Poziva se kad upis padne (DbUpdateException). Dva istovremena zahtjeva sa istim korisničkim imenom/emailom oba
+    /// prođu provjeru prije upisa, a jedinstveni indeks odbije drugi: tada se baca ista 400 greška po polju kao kod
+    /// sekvencijalnog zahtjeva. Ako ništa nije zauzeto, ne baca ništa (pozivalac prosljeđuje originalni izuzetak).
+    /// </summary>
+    Task ThrowIfAccountTakenAsync(AccountFieldsRequest request, int? currentUserId, CancellationToken cancellationToken);
+
     Task ValidateMentorAsync(ValidationErrorCollector errors, int trainingTypeId, IReadOnlyCollection<int> specializationIds, string prefix, CancellationToken cancellationToken);
 
     Task ValidateClientAsync(ValidationErrorCollector errors, int fitnessLevelId, int fitnessGoalId, int? preferredTrainingTypeId, string prefix, CancellationToken cancellationToken);
@@ -23,6 +30,21 @@ public sealed class UserAccountValidator(GoBeyondDbContext db) : IUserAccountVal
     public async Task ValidateAccountAsync(ValidationErrorCollector errors, AccountFieldsRequest request, int? currentUserId,
         CancellationToken cancellationToken)
     {
+        await RequireAvailableAsync(errors, request, currentUserId, cancellationToken);
+        errors.Require(await db.Genders.AnyAsync(x => x.Id == request.GenderId, cancellationToken),
+            "genderId", "Odabrani spol ne postoji.");
+    }
+
+    public async Task ThrowIfAccountTakenAsync(AccountFieldsRequest request, int? currentUserId, CancellationToken cancellationToken)
+    {
+        var errors = new ValidationErrorCollector();
+        await RequireAvailableAsync(errors, request, currentUserId, cancellationToken);
+        errors.ThrowIfAny();
+    }
+
+    private async Task RequireAvailableAsync(ValidationErrorCollector errors, AccountFieldsRequest request, int? currentUserId,
+        CancellationToken cancellationToken)
+    {
         var username = request.Username.Trim();
         var email = request.Email.Trim();
 
@@ -30,8 +52,6 @@ public sealed class UserAccountValidator(GoBeyondDbContext db) : IUserAccountVal
             "username", "Korisničko ime je već zauzeto.");
         errors.Require(!await db.Users.AnyAsync(x => x.Email == email && x.Id != currentUserId, cancellationToken),
             "email", "Email adresa je već registrovana.");
-        errors.Require(await db.Genders.AnyAsync(x => x.Id == request.GenderId, cancellationToken),
-            "genderId", "Odabrani spol ne postoji.");
     }
 
     public async Task ValidateMentorAsync(ValidationErrorCollector errors, int trainingTypeId, IReadOnlyCollection<int> specializationIds,

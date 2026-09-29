@@ -61,7 +61,7 @@ public sealed class GoBeyondApiFactory : WebApplicationFactory<Program>
 
         using var scope = Services.CreateScope();
         var user = scope.ServiceProvider.GetRequiredService<GoBeyondDbContext>().Users.AsNoTracking().Single(x => x.Username == username);
-        var token = scope.ServiceProvider.GetRequiredService<IJwtTokenService>().CreateAccessToken(user).Token;
+        var token = scope.ServiceProvider.GetRequiredService<IJwtTokenService>().CreateAccessToken(user, Guid.NewGuid()).Token;
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }

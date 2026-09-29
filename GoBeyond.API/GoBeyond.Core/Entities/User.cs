@@ -21,6 +21,13 @@ public class User : BaseEntity
     /// <summary>Soft delete. Obrisan korisnik se ne može odblokirati.</summary>
     public bool IsDeleted { get; set; }
 
+    /// <summary>
+    /// Upisuje se u access i refresh token. Nova vrijednost (promjena/reset lozinke, blokiranje, brisanje, promjena uloge)
+    /// odmah poništava ranije izdate tokene, i nakon odblokiranja ili vraćanja uloge (izuzetak: sesija koja je sama
+    /// promijenila lozinku, vidi UserSessions).
+    /// </summary>
+    public Guid SecurityStamp { get; set; } = Guid.NewGuid();
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLoginAt { get; set; }
 

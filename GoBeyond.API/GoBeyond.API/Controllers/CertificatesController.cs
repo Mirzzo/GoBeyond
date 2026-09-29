@@ -10,6 +10,7 @@ namespace GoBeyond.API.Controllers;
 [ApiController]
 [Route("api/certificates")]
 [Authorize(Policy = Policies.MentorOrAdmin)]
+[ForbiddenMessage(CertificateFileService.Forbidden)] // klijent: ista poruka kao za tuđi certifikat (ugovor §5)
 public sealed class CertificatesController(ICertificateFileService certificateFiles) : ControllerBase
 {
     /// <summary>Administrator ili mentor vlasnik; ostali 403, nepostojeći certifikat 404.</summary>

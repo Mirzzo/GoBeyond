@@ -23,7 +23,7 @@ public interface IAuthService
     Task<MessageResponse> RegisterMentorAsync(RegisterMentorRequest request, IReadOnlyList<FileUpload> certificates, CancellationToken cancellationToken = default);
     Task<AuthResponse> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default);
     Task LogoutAsync(int userId, string refreshToken, CancellationToken cancellationToken = default);
-    Task<MessageResponse> ChangePasswordAsync(int userId, ChangePasswordRequest request, CancellationToken cancellationToken = default);
+    Task<MessageResponse> ChangePasswordAsync(int userId, Guid? sessionId, ChangePasswordRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed class AuthService(
@@ -52,7 +52,7 @@ public sealed class AuthService(
 
         EnsureCanSignIn(user);
         user.LastLoginAt = DateTime.UtcNow;
-        return await IssueTokensAsync(user, cancellationToken);
+        return await IssueTokensAsync(user, Guid.NewGuid(), cancellationToken);
     }
 
     public async Task<AuthResponse> RegisterClientAsync(RegisterClientRequest request, CancellationToken cancellationToken = default)
@@ -76,11 +76,19 @@ public sealed class AuthService(
         };
         user.LastLoginAt = DateTime.UtcNow;
         db.Users.Add(user);
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            await accountValidator.ThrowIfAccountTakenAsync(request, null, cancellationToken);
+            throw;
+        }
 
         notifications.QueueEmail(user, "ClientRegistered", "Dobrodošli na GoBeyond",
             "Vaš klijentski nalog je uspješno kreiran. Pronađite mentora koji odgovara vašim ciljevima i započnite saradnju.");
-        return await IssueTokensAsync(user, cancellationToken);
+        return await IssueTokensAsync(user, Guid.NewGuid(), cancellationToken);
     }
 
     public async Task<MessageResponse> RegisterMentorAsync(RegisterMentorRequest request, IReadOnlyList<FileUpload> certificates,
@@ -129,9 +137,11 @@ public sealed class AuthService(
             db.Users.Add(user);
             await db.SaveChangesAsync(cancellationToken);
         }
-        catch
+        catch (Exception exception)
         {
             savedUrls.ForEach(files.Delete);
+            if (exception is DbUpdateException)
+                await accountValidator.ThrowIfAccountTakenAsync(request, null, cancellationToken);
             throw;
         }
 
@@ -149,12 +159,23 @@ public sealed class AuthService(
             .Include(x => x.User).ThenInclude(x => x.MentorProfile)
             .FirstOrDefaultAsync(x => x.TokenHash == hash, cancellationToken);
 
-        if (stored is null || stored.RevokedAt is not null || stored.ExpiresAt <= DateTime.UtcNow)
+        // Token izdat prije promjene stampa (reset/promjena lozinke, blokiranje, promjena uloge) ne važi, i kad ga je
+        // istovremeni refresh upisao tek nakon opoziva tokena.
+        if (stored is null || stored.RevokedAt is not null || stored.ExpiresAt <= DateTime.UtcNow ||
+            stored.SecurityStamp != stored.User.SecurityStamp)
             throw new UnauthorizedException(SessionExpired);
 
         EnsureCanSignIn(stored.User);
-        stored.RevokedAt = DateTime.UtcNow; // rotacija: stari token se poništava
-        return await IssueTokensAsync(stored.User, cancellationToken);
+
+        // Rotacija: stari token se poništava uslovnim UPDATE-om, pa kod istovremenih zahtjeva sa istim tokenom
+        // samo jedan uspije (ostali vide RevokedAt != null i dobijaju 401).
+        var revoked = await db.RefreshTokens
+            .Where(x => x.Id == stored.Id && x.RevokedAt == null)
+            .ExecuteUpdateAsync(x => x.SetProperty(t => t.RevokedAt, DateTime.UtcNow), cancellationToken);
+        if (revoked != 1)
+            throw new UnauthorizedException(SessionExpired);
+
+        return await IssueTokensAsync(stored.User, stored.SessionId, cancellationToken);
     }
 
     public async Task LogoutAsync(int userId, string refreshToken, CancellationToken cancellationToken = default)
@@ -165,7 +186,8 @@ public sealed class AuthService(
             .ExecuteUpdateAsync(x => x.SetProperty(t => t.RevokedAt, DateTime.UtcNow), cancellationToken);
     }
 
-    public async Task<MessageResponse> ChangePasswordAsync(int userId, ChangePasswordRequest request, CancellationToken cancellationToken = default)
+    public async Task<MessageResponse> ChangePasswordAsync(int userId, Guid? sessionId, ChangePasswordRequest request,
+        CancellationToken cancellationToken = default)
     {
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
                    ?? throw new NotFoundException(DomainTexts.UserNotFound);
@@ -175,8 +197,13 @@ public sealed class AuthService(
         if (request.NewPassword == request.CurrentPassword)
             throw new ValidationException("newPassword", "Nova lozinka mora biti različita od trenutne.");
 
+        // Nova lozinka završava sesije na drugim uređajima. Sesija ovog uređaja ostaje: stari access token dobija 401, a
+        // aplikacija ga refresh tokenom zamijeni bez ponovne prijave.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+        await db.EndSessionsAsync(user, sessionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return new MessageResponse("Lozinka je uspješno promijenjena.");
     }
 
@@ -211,16 +238,22 @@ public sealed class AuthService(
         CreatedAt = DateTime.UtcNow
     };
 
-    private async Task<AuthResponse> IssueTokensAsync(User user, CancellationToken cancellationToken)
+    /// <summary>
+    /// Tokeni nose stamp korisnika pročitan na početku zahtjeva: ako su sesije u međuvremenu završene (UserSessions), novi refresh
+    /// i access token odmah ne važe.
+    /// </summary>
+    private async Task<AuthResponse> IssueTokensAsync(User user, Guid sessionId, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        var (accessToken, expiresAt) = tokens.CreateAccessToken(user);
+        var (accessToken, expiresAt) = tokens.CreateAccessToken(user, sessionId);
         var refreshToken = tokens.CreateRefreshToken();
 
         db.RefreshTokens.Add(new RefreshToken
         {
             UserId = user.Id,
             TokenHash = tokens.HashRefreshToken(refreshToken),
+            SessionId = sessionId,
+            SecurityStamp = user.SecurityStamp,
             CreatedAt = now,
             ExpiresAt = now.AddDays(jwtOptions.Value.RefreshTokenLifetimeDays)
         });

@@ -8,6 +8,7 @@ using GoBeyond.Core.SearchObjects;
 using GoBeyond.Infrastructure.Common;
 using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Security;
+using GoBeyond.Infrastructure.Services.Auth;
 using GoBeyond.Infrastructure.Services.Subscriptions;
 using GoBeyond.Infrastructure.Services.Users;
 using Microsoft.EntityFrameworkCore;
@@ -94,13 +95,25 @@ public sealed class AdminUserService(
             ProfileUpdater.ApplyClient(user.ClientProfile, request.Client);
         }
 
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         if (roleChanged)
         {
+            // Mentorski profil ostaje (vraćanjem uloge Mentor je ponovo vidljiv), ali dok uloga nije Mentor
+            // profil se ne prikazuje i ne može se ugovoriti saradnja (QueryExtensions.Visible).
             user.Role = request.Role;
-            await RevokeTokensAsync(user.Id, cancellationToken);
+            await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            await accountValidator.ThrowIfAccountTakenAsync(request, id, cancellationToken);
+            throw;
+        }
+        await transaction.CommitAsync(cancellationToken);
         return await GetUserAsync(id, cancellationToken);
     }
 
@@ -108,9 +121,11 @@ public sealed class AdminUserService(
     {
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken)
                    ?? throw new NotFoundException(DomainTexts.UserNotFound);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
-        await RevokeTokensAsync(id, cancellationToken);
+        await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return new MessageResponse($"Lozinka korisnika {user.FullName} je uspješno resetovana.");
     }
 
@@ -119,9 +134,11 @@ public sealed class AdminUserService(
         if (id == adminUserId) throw new ValidationException("Ne možete blokirati vlastiti nalog.");
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken)
                    ?? throw new NotFoundException(DomainTexts.UserNotFound);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         user.IsActive = false;
-        await RevokeTokensAsync(id, cancellationToken);
+        await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return ProfileMapper.ToAdminUser(user);
     }
 
@@ -183,7 +200,7 @@ public sealed class AdminUserService(
 
         user.IsDeleted = true;
         user.IsActive = false;
-        await RevokeTokensAsync(id, cancellationToken);
+        await db.EndSessionsAsync(user, keepSessionId: null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -195,8 +212,4 @@ public sealed class AdminUserService(
     private Task<bool> HasOpenCollaborationsAsync(User user, CancellationToken cancellationToken) =>
         db.Subscriptions.AnyAsync(x => QueryExtensions.OpenStatuses.Contains(x.Status) &&
                                        (x.MentorProfile.UserId == user.Id || x.ClientProfile.UserId == user.Id), cancellationToken);
-
-    private Task RevokeTokensAsync(int userId, CancellationToken cancellationToken) =>
-        db.RefreshTokens.Where(x => x.UserId == userId && x.RevokedAt == null)
-            .ExecuteUpdateAsync(x => x.SetProperty(t => t.RevokedAt, DateTime.UtcNow), cancellationToken);
 }

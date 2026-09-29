@@ -46,5 +46,5 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [HttpPost("change-password")]
     [Authorize]
     public Task<MessageResponse> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken cancellationToken) =>
-        authService.ChangePasswordAsync(User.GetUserId(), request, cancellationToken);
+        authService.ChangePasswordAsync(User.GetUserId(), User.GetSessionId(), request, cancellationToken);
 }

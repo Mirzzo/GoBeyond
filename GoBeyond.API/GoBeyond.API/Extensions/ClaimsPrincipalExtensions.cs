@@ -16,6 +16,10 @@ public static class ClaimsPrincipalExtensions
             ? id
             : null;
 
+    /// <summary>Sesija (RefreshToken.SessionId) uz koju je access token izdat; null ako token nema tvrdnju "sid".</summary>
+    public static Guid? GetSessionId(this ClaimsPrincipal user) =>
+        Guid.TryParse(user.FindFirstValue(JwtTokenService.SessionIdClaim), out var id) ? id : null;
+
     public static UserRole GetRole(this ClaimsPrincipal user) =>
         Enum.TryParse<UserRole>(user.FindFirstValue(JwtTokenService.RoleClaim), out var role)
             ? role
