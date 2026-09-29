@@ -42,8 +42,9 @@ public interface ISubscriptionWorkflow
     void Expire(Subscription subscription, DateTime now);
 
     /// <summary>
-    /// Označava uplatu uspješnom i primjenjuje je na pretplatu. Ako se uplata ne može primijeniti
-    /// (pretplata je u međuvremenu otkazana/istekla ili je uplata duplikat), novac se automatski vraća.
+    /// Označava uplatu uspješnom i primjenjuje je na pretplatu (početna uplata postavlja i cijenu pretplate na naplaćeni
+    /// iznos). Ako se uplata ne može primijeniti (pretplata je u međuvremenu otkazana/istekla ili je uplata duplikat), novac
+    /// se automatski vraća.
     /// Vraća false ako je uplata već bila obrađena. Payment.PaidAt (vrijeme naplate na Stripe-u) se zadržava ako je postavljen.
     /// </summary>
     Task<bool> ApplySuccessfulPaymentAsync(Payment payment, DateTime now, CancellationToken cancellationToken);
@@ -161,6 +162,10 @@ public sealed class SubscriptionWorkflow(
 
         if (payment.Purpose == PaymentPurpose.Initial && subscription.Status == SubscriptionStatus.PendingPayment)
         {
+            // Cijena pretplate je naplaćeni iznos: klijent je mogao platiti raniji PaymentIntent nakon što je ponovni ulazak
+            // u plaćanje (POST /api/subscriptions) pretplati postavio novu cijenu mentora.
+            subscription.Price = payment.Amount;
+            subscription.Currency = payment.Currency;
             subscription.Status = SubscriptionStatus.AwaitingMentor;
             subscription.PaidAt = payment.PaidAt;
             notifications.Notify(mentor, NotificationType.NewCollaborationRequest, "Novi zahtjev za saradnju",

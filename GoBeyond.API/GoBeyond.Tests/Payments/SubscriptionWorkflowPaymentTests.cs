@@ -58,6 +58,19 @@ public class SubscriptionWorkflowPaymentTests
     }
 
     [Fact]
+    public async Task InitialPayment_KeepsTheChargedAmountAsTheSubscriptionPrice()
+    {
+        // Ponovni ulazak u plaćanje je pretplati dao novu cijenu mentora, a naplaćen je raniji PaymentIntent (29,99).
+        var payment = PaymentFor(SubscriptionStatus.PendingPayment, PaymentPurpose.Initial);
+        payment.Subscription.Price = 35.00m;
+
+        await _workflow.ApplySuccessfulPaymentAsync(payment, Now, CancellationToken.None);
+
+        Assert.Equal(SubscriptionStatus.AwaitingMentor, payment.Subscription.Status);
+        Assert.Equal((29.99m, "usd"), (payment.Subscription.Price, payment.Subscription.Currency));
+    }
+
+    [Fact]
     public async Task RenewalPayment_ForActiveSubscription_ExtendsEndDateBy30Days()
     {
         var payment = PaymentFor(SubscriptionStatus.Active, PaymentPurpose.Renewal);

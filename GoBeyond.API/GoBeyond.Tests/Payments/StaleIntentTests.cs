@@ -3,6 +3,7 @@ using GoBeyond.Core.Enums;
 using GoBeyond.Core.Exceptions;
 using GoBeyond.Infrastructure.Services.Payments;
 using GoBeyond.Tests.Subscriptions;
+using Microsoft.EntityFrameworkCore;
 
 namespace GoBeyond.Tests.Payments;
 
@@ -45,6 +46,33 @@ public sealed class StaleIntentTests : IDisposable
         var subscription = await _db.SubscriptionAsync(id);
         Assert.Equal(SubscriptionStatus.AwaitingMentor, subscription.Status);
         Assert.Equal(PaymentStatus.Succeeded, Assert.Single(subscription.Payments).Status);
+    }
+
+    [Fact]
+    public async Task ResumingAfterTheOldIntentWasPaid_KeepsThePriceThatWasCharged()
+    {
+        // Klijent je platio PaymentSheet (16,00), aplikacija je ugašena prije potvrde, mentor je zatim podigao cijenu, a klijent
+        // se vratio na plaćanje: POST /api/subscriptions pretplati daje novu cijenu, a create-intent primjenjuje plaćenu uplatu.
+        var id = await _db.AddSubscriptionAsync(SubscriptionStatus.PendingPayment, x => x.Price = 16.00m);
+        await _db.AddPaymentAsync(id, "pi_paid", PaymentStatus.Pending, "succeeded", amount: 16.00m);
+        await _db.RunAsync(db => db.MentorProfiles.Where(x => x.Id == _db.MentorProfileId)
+            .ExecuteUpdateAsync(x => x.SetProperty(m => m.MonthlyPrice, 17.00m)));
+
+        var resumed = await _db.RunAsync(db => _db.Subscriptions(db).CreateAsync(_db.ClientUser.Id, new CreateSubscriptionRequest
+        {
+            MentorProfileId = _db.MentorProfileId, Questionnaire = SubscriptionTestDatabase.QuestionnaireRequest()
+        }));
+        var error = await Assert.ThrowsAsync<ConflictException>(() => CreateIntentAsync(id));
+
+        Assert.Equal((id, SubscriptionStatus.PendingPayment, 17.00m), (resumed.Id, resumed.Status, resumed.Price));
+        Assert.Equal(PaymentService.AlreadyPaid, error.Message);
+        Assert.Empty(_db.Gateway.CreateCalls);
+        var subscription = await _db.SubscriptionAsync(id);
+        Assert.Equal((SubscriptionStatus.AwaitingMentor, 16.00m), (subscription.Status, subscription.Price));
+        var payment = Assert.Single(subscription.Payments);
+        Assert.Equal((PaymentStatus.Succeeded, 16.00m), (payment.Status, payment.Amount));
+        var mine = await _db.RunAsync(db => _db.Subscriptions(db).GetMineByIdAsync(_db.ClientUser.Id, id));
+        Assert.Equal(16.00m, mine.Price);
     }
 
     [Fact]
