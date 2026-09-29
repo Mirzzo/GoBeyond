@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/auth/auth_scope.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../data/repositories/notification_repository.dart';
 import '../../widgets/app_dialogs.dart';
 import '../../widgets/app_panel.dart';
 import '../../widgets/gb_scaffold.dart';
@@ -10,8 +12,34 @@ import '../mentor/recommended_mentors_screen.dart';
 import '../notifications/notifications_screen.dart';
 
 /// "Ostalo..": Obavijesti, Poruke, Preporučeni mentori and Odjava.
-class OtherScreen extends StatelessWidget {
-  const OtherScreen({super.key});
+class OtherScreen extends StatefulWidget {
+  const OtherScreen({super.key, this.notificationRepository});
+
+  final NotificationRepository? notificationRepository;
+
+  @override
+  State<OtherScreen> createState() => _OtherScreenState();
+}
+
+class _OtherScreenState extends State<OtherScreen> {
+  late final NotificationRepository _notificationRepository =
+      widget.notificationRepository ?? ApiNotificationRepository();
+  int _unreadCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnreadCount();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final count = await _notificationRepository.getUnreadCount();
+      if (mounted) setState(() => _unreadCount = count);
+    } catch (_) {
+      // Non-critical; the badge simply stays hidden if this fails.
+    }
+  }
 
   Future<void> _logout(BuildContext context) async {
     final confirmed = await showConfirmDialog(
@@ -42,9 +70,13 @@ class OtherScreen extends StatelessWidget {
           _OtherTile(
             icon: Icons.notifications_none_rounded,
             label: 'Obavijesti',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-            ),
+            badgeCount: _unreadCount,
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              );
+              _loadUnreadCount();
+            },
           ),
           const SizedBox(height: 14),
           _OtherTile(
@@ -77,12 +109,17 @@ class OtherScreen extends StatelessWidget {
 }
 
 class _OtherTile extends StatelessWidget {
-  const _OtherTile(
-      {required this.icon, required this.label, required this.onTap});
+  const _OtherTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.badgeCount = 0,
+  });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -97,6 +134,24 @@ class _OtherTile extends StatelessWidget {
                 style:
                     const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
           ),
+          if (badgeCount > 0) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.accent,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                badgeCount > 99 ? '99+' : '$badgeCount',
+                style: const TextStyle(
+                  color: AppTheme.onAccent,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
           const Icon(Icons.chevron_right_rounded),
         ],
       ),
