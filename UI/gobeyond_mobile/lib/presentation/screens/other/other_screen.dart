@@ -73,8 +73,12 @@ class _OtherScreenState extends State<OtherScreen> {
             badgeCount: _unreadCount,
             onTap: () async {
               await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                MaterialPageRoute(
+                  builder: (_) => NotificationsScreen(
+                      notificationRepository: widget.notificationRepository),
+                ),
               );
+              // Notifications read there lower the unread count.
               _loadUnreadCount();
             },
           ),
