@@ -34,6 +34,26 @@ public class RecipientSuppressionTests
         Assert.False(RecipientSuppression.ShouldSuppress("smtp.gmail.com", "test@example.com", SuppressedDomains));
     }
 
+    [Theory]
+    [InlineData("x@edu.gobeyond.ba")]
+    [InlineData("x@EDU.GOBEYOND.BA")]
+    [InlineData("x@a.b.gobeyond.ba")]
+    public void ShouldSuppress_SuppressesSubdomainsOfConfiguredDomain_WhenHostIsRealSmtp(string recipient)
+    {
+        // NOT-08 / AUTH-03: qa.sec.2@edu.gobeyond.ba was really sent through Gmail because ShouldSuppress only
+        // matched the domain exactly. edu.gobeyond.ba is a subdomain of the suppressed gobeyond.ba and belongs
+        // to the same third party, so it must be suppressed too.
+        Assert.True(RecipientSuppression.ShouldSuppress("smtp.gmail.com", recipient, SuppressedDomains));
+    }
+
+    [Fact]
+    public void ShouldSuppress_DoesNotSuppressDomainThatMerelyEndsWithSuffix_WhenHostIsRealSmtp()
+    {
+        // "notgobeyond.ba" ends with the same letters as "gobeyond.ba" but is not a subdomain of it (no dot
+        // boundary) and must NOT be suppressed - it's someone else's domain.
+        Assert.False(RecipientSuppression.ShouldSuppress("smtp.gmail.com", "x@notgobeyond.ba", SuppressedDomains));
+    }
+
     [Fact]
     public void ShouldSuppress_ReturnsFalse_WhenNoDomainsConfigured()
     {
