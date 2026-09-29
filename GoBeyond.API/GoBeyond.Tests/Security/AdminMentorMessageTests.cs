@@ -3,13 +3,18 @@ using GoBeyond.Core.Entities;
 using GoBeyond.Core.Enums;
 using GoBeyond.Infrastructure.Database;
 using GoBeyond.Infrastructure.Services.Admin;
+using GoBeyond.Infrastructure.Services.Notifications;
 using GoBeyond.Tests.Payments;
 using GoBeyond.Tests.TestInfrastructure;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace GoBeyond.Tests.Security;
 
-/// <summary>Poruke odobravanja/odbijanja mentorskog naloga ne smiju pretpostavljati muški rod (npr. "Mentor Selma Delić je odobren").</summary>
+/// <summary>
+/// Poruke odobravanja/odbijanja mentorskog naloga ne smiju pretpostavljati muški rod (npr. "Mentor Selma Delić je odobren"), a
+/// razlog odbijanja u obavijesti i emailu je rečenica sa završnom tačkom.
+/// </summary>
 public sealed class AdminMentorMessageTests : IDisposable
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
@@ -39,6 +44,26 @@ public sealed class AdminMentorMessageTests : IDisposable
             .RejectAsync(mentorId, new RejectRequest { Reason = "Certifikat nije čitljiv." });
 
         Assert.Equal("Zahtjev za mentorski nalog (Selma Delić) je odbijen.", result.Message);
+    }
+
+    [Theory]
+    [InlineData("  Nedovoljno dokumentacije za odobrenje  ", "Nedovoljno dokumentacije za odobrenje.")]
+    [InlineData("Certifikat nije čitljiv.", "Certifikat nije čitljiv.")]
+    [InlineData("Zašto nema licence?", "Zašto nema licence?")]
+    public async Task Reject_NotificationAndEmailEndTheReasonWithAPeriod(string reason, string sentence)
+    {
+        await using var db = SqliteTestDbContext.Create(_connection);
+        var mentorId = await SeedPendingMentorAsync(db, "selma.reason");
+
+        await new AdminMentorService(db, new NotificationSender(db)).RejectAsync(mentorId, new RejectRequest { Reason = reason });
+
+        var expected = $"Vaš zahtjev za mentorski nalog je odbijen. Razlog: {sentence}";
+        var notification = await db.Notifications.AsNoTracking().SingleAsync(x => x.Type == NotificationType.MentorRejected);
+        Assert.Equal(expected, notification.Body);
+        var email = await db.OutboxMessages.AsNoTracking().SingleAsync(x => x.EventType == nameof(NotificationType.MentorRejected));
+        Assert.Equal($"Pozdrav Selma,\n\n{expected}\n\nVaš GoBeyond tim", email.Body);
+        // Sačuvani razlog ostaje kako ga je administrator upisao (prijava ga prikazuje iza dvotačke).
+        Assert.Equal(reason.Trim(), await db.MentorProfiles.Where(x => x.Id == mentorId).Select(x => x.RejectionReason).SingleAsync());
     }
 
     private static async Task<int> SeedPendingMentorAsync(GoBeyondDbContext db, string username)

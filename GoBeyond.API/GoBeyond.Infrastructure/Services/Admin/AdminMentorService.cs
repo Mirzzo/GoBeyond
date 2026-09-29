@@ -146,7 +146,7 @@ public sealed class AdminMentorService(GoBeyondDbContext db, INotificationSender
         mentor.ReviewedAt = DateTime.UtcNow;
 
         notifications.Notify(mentor.User, NotificationType.MentorRejected, "Zahtjev za mentorski nalog je odbijen",
-            $"Vaš zahtjev za mentorski nalog je odbijen. Razlog: {reason}", sendEmail: true);
+            $"Vaš zahtjev za mentorski nalog je odbijen. Razlog: {DomainTexts.Sentence(reason)}", sendEmail: true);
         await db.SaveChangesAsync(cancellationToken);
         return new MessageResponse($"Zahtjev za mentorski nalog ({mentor.User.FullName}) je odbijen.");
     }
