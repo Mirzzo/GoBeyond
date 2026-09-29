@@ -41,6 +41,9 @@ public sealed class AuthService(
     public const string PendingMentorMessage = "Vaš mentorski nalog čeka odobrenje administratora.";
     public const string SessionExpired = "Sesija je istekla. Prijavite se ponovo.";
 
+    /// <summary>Sesija koju je završila izmjena naloga (nova lozinka, blokiranje, brisanje, promjena uloge).</summary>
+    public const string SessionInvalid = "Sesija više nije važeća. Prijavite se ponovo.";
+
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
         var login = request.Username.Trim();
@@ -196,9 +199,10 @@ public sealed class AuthService(
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
                    ?? throw new NotFoundException(DomainTexts.UserNotFound);
 
-        // Nalog je blokiran ili obrisan dok je zahtjev čekao: sesije su mu već završene.
+        // Nalog je blokiran ili obrisan dok je zahtjev čekao: sesije su mu već završene, pa je odgovor isti kao za svaki
+        // drugi zahtjev sa tokenom te sesije.
         if (user.IsDeleted || !user.IsActive)
-            throw new UnauthorizedException(SessionExpired);
+            throw new UnauthorizedException(SessionInvalid);
         if (!passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
             throw new ValidationException("currentPassword", "Trenutna lozinka nije ispravna.");
         if (request.NewPassword == request.CurrentPassword)

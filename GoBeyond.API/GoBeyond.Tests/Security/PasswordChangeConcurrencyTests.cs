@@ -96,18 +96,22 @@ public sealed class PasswordChangeConcurrencyTests : IAsyncLifetime
         Assert.Equal(user.SecurityStamp, active.SecurityStamp);
     }
 
-    [Fact]
-    public async Task AccountBlockedJustBeforeOwnChangeIsWritten_ChangeIsRejectedAndPasswordStays()
+    /// <summary>Isti 401 kao za svaki drugi zahtjev sesije koju je blokiranje ili brisanje završilo (ugovor v1.7).</summary>
+    [Theory]
+    [InlineData("block")]
+    [InlineData("delete")]
+    public async Task AccountBlockedOrDeletedJustBeforeOwnChangeIsWritten_ChangeIsRejectedAndPasswordStays(string operation)
     {
-        var block = new BeforeFirstUpdate(() => _db.RunAsync(db => Admin(db).BlockAsync(adminUserId: 0, UserId)));
-        await using var db = _db.CreateContext(block);
+        var change = new BeforeFirstUpdate(() => _db.RunAsync(db => Operation(db, operation)));
+        await using var db = _db.CreateContext(change);
 
         var error = await Assert.ThrowsAsync<UnauthorizedException>(() => ChangeAsync(db, _sessionA, "Moja12345"));
 
-        Assert.True(block.Fired);
-        Assert.Equal(AuthService.SessionExpired, error.Message);
+        Assert.True(change.Fired);
+        Assert.Equal("Sesija više nije važeća. Prijavite se ponovo.", error.Message);
         var user = await UserAsync();
         Assert.False(user.IsActive);
+        Assert.Equal(operation == "delete", user.IsDeleted);
         Assert.True(_hasher.Verify(Password, user.PasswordHash));
     }
 
