@@ -101,8 +101,8 @@ class _ClientReportDialogState extends State<_ClientReportDialog> {
       if (print) {
         await PdfReport.print(bytes, 'izvjestaj-klijent-${widget.clientProfileId}');
       } else {
-        await PdfReport.save(bytes, 'izvjestaj-klijent-${widget.clientProfileId}.pdf');
-        if (mounted) showSuccessSnack(context, 'Izvještaj je sačuvan.');
+        final savedUri = await PdfReport.save(bytes, 'izvjestaj-klijent-${widget.clientProfileId}.pdf');
+        if (mounted && savedUri != null) showSuccessSnack(context, 'Izvještaj je sačuvan.');
       }
     } catch (error) {
       if (mounted) showErrorSnack(context, ApiError.from(error).message);

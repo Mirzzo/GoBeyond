@@ -101,8 +101,8 @@ class _MentorReportDialogState extends State<_MentorReportDialog> {
       if (print) {
         await PdfReport.print(bytes, 'izvjestaj-mentor-${widget.mentorProfileId}');
       } else {
-        await PdfReport.save(bytes, 'izvjestaj-mentor-${widget.mentorProfileId}.pdf');
-        if (mounted) showSuccessSnack(context, 'Izvještaj je sačuvan.');
+        final savedUri = await PdfReport.save(bytes, 'izvjestaj-mentor-${widget.mentorProfileId}.pdf');
+        if (mounted && savedUri != null) showSuccessSnack(context, 'Izvještaj je sačuvan.');
       }
     } catch (error) {
       if (mounted) showErrorSnack(context, ApiError.from(error).message);

@@ -293,8 +293,10 @@ class _MentorReportTabState extends State<_MentorReportTab> with AutomaticKeepAl
       if (print) {
         await PdfReport.print(bytes, 'izvjestaj-mentori');
       } else {
-        await PdfReport.save(bytes, 'izvjestaj-mentori-$_year-$_month.pdf');
-        if (mounted) showSuccessSnack(context, 'Izvještaj je sačuvan.');
+        final savedUri = await PdfReport.save(bytes, 'izvjestaj-mentori-$_year-$_month.pdf');
+        // PdfReport.save returns null when the user cancelled the Save
+        // dialog — nothing was written, so there is nothing to confirm.
+        if (mounted && savedUri != null) showSuccessSnack(context, 'Izvještaj je sačuvan.');
       }
     } catch (error) {
       if (mounted) showErrorSnack(context, ApiError.from(error).message);
@@ -477,8 +479,8 @@ class _ClientReportTabState extends State<_ClientReportTab> with AutomaticKeepAl
       if (print) {
         await PdfReport.print(bytes, 'izvjestaj-klijenti');
       } else {
-        await PdfReport.save(bytes, 'izvjestaj-klijenti-$_year-$_month.pdf');
-        if (mounted) showSuccessSnack(context, 'Izvještaj je sačuvan.');
+        final savedUri = await PdfReport.save(bytes, 'izvjestaj-klijenti-$_year-$_month.pdf');
+        if (mounted && savedUri != null) showSuccessSnack(context, 'Izvještaj je sačuvan.');
       }
     } catch (error) {
       if (mounted) showErrorSnack(context, ApiError.from(error).message);

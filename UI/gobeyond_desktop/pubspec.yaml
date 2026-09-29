@@ -20,6 +20,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Used only by test/pdf_report_save_test.dart, to stub FilePickerPlatform
+  # (MockPlatformInterfaceMixin) and simulate the user cancelling the Save
+  # dialog — file_picker already pulls this in transitively.
+  plugin_platform_interface: ^2.1.8
 
 flutter:
   uses-material-design: true
