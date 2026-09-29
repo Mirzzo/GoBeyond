@@ -214,6 +214,36 @@ void main() {
     expect(find.widgetWithText(TextFormField, '78'), findsOneWidget);
   });
 
+  testWidgets('switching from a month with an entry to an empty month does '
+      'not carry the old values into the new month\'s form', (tester) async {
+    final repository = FakeProgressRepository();
+    repository.entriesByKey['2025-6'] = _entry(weightKg: 80);
+    await _pumpScreen(tester, repository);
+    expect(find.text('Grudi 100cm'), findsOneWidget);
+    expect(find.text('SPREMI IZMJENE'), findsOneWidget);
+
+    await tester.tap(find.textContaining('MJESEC:'));
+    await tester.pumpAndSettle();
+    // May's entry stays in flight until the gate opens.
+    final gate = Completer<void>();
+    repository.gate = gate;
+    await tester.tap(find.text('Maj').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(repository.getEntryCalls.last, '2025-5');
+    expect(find.text('Grudi 100cm'), findsNothing);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('MJESEC: Maj'), findsOneWidget);
+    expect(find.text('SAČUVAJ UNOS'), findsOneWidget);
+    expect(find.text('Grudi 100cm'), findsNothing);
+    expect(find.text('Bench 80kg'), findsNothing);
+    expect(find.text('5km u 25min'), findsNothing);
+    expect(find.widgetWithText(TextFormField, '80'), findsNothing);
+  });
+
   testWidgets('a refreshed entry with new values updates the month card',
       (tester) async {
     final repository = FakeProgressRepository();
