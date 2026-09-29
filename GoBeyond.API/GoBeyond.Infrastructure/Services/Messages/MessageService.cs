@@ -133,8 +133,9 @@ public sealed class MessageService(GoBeyondDbContext db, INotificationSender not
     private static bool CanSend(SubscriptionStatus status) =>
         status is SubscriptionStatus.AwaitingMentor or SubscriptionStatus.Active;
 
+    /// <summary>Mentoru se nikad ne prikazuje zahtjev koji klijent nije platio (ni kad je u međuvremenu otkazan).</summary>
     private IQueryable<Subscription> VisibleSubscriptions(int userId, UserRole role) => role == UserRole.Mentor
-        ? db.Subscriptions.AsNoTracking().Where(x => x.MentorProfile.UserId == userId && MentorVisibleStatuses.Contains(x.Status))
+        ? db.Subscriptions.AsNoTracking().Where(x => x.MentorProfile.UserId == userId && MentorVisibleStatuses.Contains(x.Status) && x.PaidAt != null)
         : db.Subscriptions.AsNoTracking().Where(x => x.ClientProfile.UserId == userId && x.Status != SubscriptionStatus.PendingPayment);
 
     private async Task<Subscription> EnsureAccessAsync(int userId, UserRole role, int subscriptionId, CancellationToken cancellationToken)
