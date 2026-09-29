@@ -22,6 +22,23 @@ class PrimaryButton extends StatelessWidget {
   final bool isLoading;
   final double height;
 
+  // The theme's vertical padding (16) is tuned for the standard 56 height;
+  // at a smaller height it leaves too little room for the label and clips
+  // it, so a shorter button gets less vertical padding. The horizontal
+  // padding stays the theme's.
+  ButtonStyle _shortStyle(BuildContext context) {
+    final themePadding = Theme.of(context)
+        .elevatedButtonTheme
+        .style
+        ?.padding
+        ?.resolve(const <WidgetState>{})
+        ?.resolve(Directionality.of(context));
+    return ElevatedButton.styleFrom(
+      padding: EdgeInsets.fromLTRB(
+          themePadding?.left ?? 0, 8, themePadding?.right ?? 0, 8),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -29,6 +46,7 @@ class PrimaryButton extends StatelessWidget {
       height: height,
       child: ElevatedButton(
         onPressed: isLoading ? null : onPressed,
+        style: height < 56 ? _shortStyle(context) : null,
         child: isLoading
             ? const SizedBox(
                 width: 22,

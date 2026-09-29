@@ -114,7 +114,7 @@ class _RecommendedMentorsScreenState extends State<RecommendedMentorsScreen> {
                                   width: 150,
                                   child: PrimaryButton(
                                     label: 'VIŠE INFO...',
-                                    height: 40,
+                                    height: 46,
                                     onPressed: () => Navigator.of(context).push(
                                       MaterialPageRoute(
                                         builder: (_) => MentorDetailScreen(
