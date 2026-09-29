@@ -42,11 +42,11 @@ public class SentMessageIdStoreTests : IDisposable
         Assert.True(afterRestart.WasSent("109:100:abc"));
     }
 
-    // Review major defect: keying only on the outbox MessageId (109) meant that after a database reset (a
-    // fresh dev/test DB, a second install, ...) a COMPLETELY DIFFERENT email that happened to reuse Id 109
-    // would be silently acked and never sent. EmailIdempotencyKey.For includes CreatedAtTicks and a content
-    // hash, so a genuinely different message - even with the same MessageId - produces a different key here
-    // and is correctly treated as NOT sent.
+    // Keying only on the outbox MessageId (109) meant that after a database reset (a fresh dev/test DB, a
+    // second install, ...) a COMPLETELY DIFFERENT email that happened to reuse Id 109 would be silently acked
+    // and never sent. EmailIdempotencyKey.For includes CreatedAtTicks and a content hash, so a genuinely
+    // different message - even with the same MessageId - produces a different key here and is correctly
+    // treated as NOT sent.
     [Fact]
     public void WasSent_DoesNotTreatAReusedMessageIdWithDifferentContentAsAlreadySent_AfterSimulatedDbReset()
     {
@@ -107,10 +107,10 @@ public class SentMessageIdStoreTests : IDisposable
         Assert.False(reloaded.WasSent("1:1:x"));
     }
 
-    // Review defect: the OLD store format (before EmailIdempotencyKey existed) wrote bare
-    // EmailNotificationMessage.MessageId integers, one per line ("109"). Loading that file must not throw, and
-    // since a legacy bare-integer line never contains ':' it can never collide with a new composite key -
-    // it just sits inert until compaction drops it.
+    // The OLD store format (before EmailIdempotencyKey existed) wrote bare EmailNotificationMessage.MessageId
+    // integers, one per line ("109"). Loading that file must not throw, and since a legacy bare-integer line
+    // never contains ':' it can never collide with a new composite key - it just sits inert until compaction
+    // drops it.
     [Fact]
     public void Load_HandlesOldPlainIntegerFormat_WithoutThrowing_AndNeverMatchesANewCompositeKey()
     {
@@ -123,12 +123,11 @@ public class SentMessageIdStoreTests : IDisposable
         Assert.True(store.WasSent("200:1:y"));
     }
 
-    // Review minor defect: a store bookkeeping failure (locked/unreadable file - e.g. a OneDrive-synced repo
-    // folder) must not stop the consumer from starting at all. Pointing the path at a DIRECTORY makes
-    // File.Exists false (Load returns immediately) as one common failure mode; the constructor must not throw
-    // regardless.
+    // A store bookkeeping failure (locked/unreadable file - e.g. a OneDrive-synced repo folder) must not stop
+    // the consumer from starting at all. Pointing the path at a DIRECTORY makes File.Exists false, so Load()
+    // returns before attempting any I/O - the constructor must not throw regardless.
     [Fact]
-    public void Constructor_DoesNotThrow_WhenPathIsUnreadable()
+    public void Constructor_DoesNotThrow_WhenPathIsADirectory()
     {
         var directoryPath = Path.Combine(Path.GetTempPath(), $"gobeyond-sent-ids-dir-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directoryPath);
@@ -144,9 +143,23 @@ public class SentMessageIdStoreTests : IDisposable
         }
     }
 
-    // Review minor defect: MarkSent must never propagate an IO failure - the caller (Worker.HandleAsync) calls
-    // it AFTER a successful SMTP send and must still be able to ack. Pointing the path at a directory makes
-    // the AppendAllText write fail every time.
+    // File.Exists is true here (unlike the directory case above), so Load() actually reaches File.ReadAllLines
+    // and must catch the sharing violation itself - this is what genuinely exercises Load()'s catch block.
+    [Fact]
+    public void Constructor_DoesNotThrow_WhenTheFileIsLockedByAnotherHandle()
+    {
+        File.WriteAllText(_path, "109:100:abc" + Environment.NewLine);
+        using var exclusiveHandle = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var store = new SentMessageIdStore(_path, NullLogger.Instance);
+
+        Assert.True(store.IsEnabled);
+        Assert.False(store.WasSent("109:100:abc")); // Load() could not read the locked file, started empty
+    }
+
+    // MarkSent must never propagate an IO failure - the caller (Worker.HandleAsync) calls it AFTER a
+    // successful SMTP send and must still be able to ack. Pointing the path at a directory makes the
+    // AppendAllText write fail every time.
     [Fact]
     public void MarkSent_DoesNotThrow_WhenTheFileCannotBeWritten()
     {
@@ -171,9 +184,9 @@ public class SentMessageIdStoreTests : IDisposable
     [InlineData("sub/ids.txt")]
     public void ResolvePath_ResolvesRelativePath_UnderOsTempFolder_NeverUnderCurrentDirectory(string relative)
     {
-        // Review defect: a relative path (the appsettings.Shared.json default) must not resolve against the
-        // process' current working directory - `dotnet run` from the repo root would otherwise write the file
-        // straight into the git-tracked, OneDrive-synced repository.
+        // A relative path (the appsettings.Shared.json default) must not resolve against the process' current
+        // working directory - `dotnet run` from the repo root would otherwise write the file straight into
+        // the git-tracked, OneDrive-synced repository.
         var resolved = SentMessageIdStore.ResolvePath(relative);
 
         Assert.True(Path.IsPathRooted(resolved));
