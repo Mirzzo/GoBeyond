@@ -40,8 +40,23 @@ class Formatters {
     'NED',
   ];
 
+  /// Lowercase accusative forms for "... za PONEDJELJAK/SRIJEDU/SUBOTU..."
+  /// (Bosnian "za" governs the accusative case, not the nominative).
+  static const dayNamesAccusative = <String>[
+    'ponedjeljak',
+    'utorak',
+    'srijedu',
+    'četvrtak',
+    'petak',
+    'subotu',
+    'nedjelju',
+  ];
+
   /// dayOfWeek is 1=Ponedjeljak..7=Nedjelja per the API contract.
   static String dayName(int dayOfWeek) => dayNames[(dayOfWeek - 1).clamp(0, 6)];
+
+  static String dayNameAccusative(int dayOfWeek) =>
+      dayNamesAccusative[(dayOfWeek - 1).clamp(0, 6)];
 
   static String monthName(int month) => monthNames[(month - 1).clamp(0, 11)];
 

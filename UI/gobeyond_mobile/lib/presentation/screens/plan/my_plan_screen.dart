@@ -90,10 +90,22 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
         _future = _load();
       });
 
+  Future<void> _refresh() async {
+    final next = _load();
+    setState(() {
+      _future = next;
+    });
+    try {
+      await next;
+    } catch (_) {
+      // Surfaced via the FutureBuilder's own error state instead.
+    }
+  }
+
   Future<void> _completeTraining(TrainingPlan plan, DayPlan day) async {
     final result = await showDialog<_CompletionResult>(
       context: context,
-      builder: (_) => _CompleteTrainingDialog(dayName: day.dayName),
+      builder: (_) => _CompleteTrainingDialog(dayOfWeek: day.dayOfWeek),
     );
     if (result == null) return;
 
@@ -121,67 +133,84 @@ class _MyPlanScreenState extends State<MyPlanScreen> {
   @override
   Widget build(BuildContext context) {
     return GbScaffold(
-      body: FutureBuilder<_PlanScreenData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const LoadingView();
-          }
-          if (snapshot.hasError) {
-            return ErrorView(
-              message: ApiException.from(snapshot.error!).message,
-              onRetry: _reload,
-            );
-          }
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<_PlanScreenData>(
+          future: _future,
+          builder: (context, snapshot) {
+            // A refresh keeps the loaded content on screen (FutureBuilder
+            // carries the previous data over while the new future runs).
+            if (!snapshot.hasData &&
+                snapshot.connectionState != ConnectionState.done) {
+              return const PullToRefreshFallback(child: LoadingView());
+            }
+            if (snapshot.hasError) {
+              return PullToRefreshFallback(
+                child: ErrorView(
+                  message: ApiException.from(snapshot.error!).message,
+                  onRetry: _reload,
+                ),
+              );
+            }
 
-          final data = snapshot.data!;
-          switch (data.state) {
-            case _PlanState.none:
-              return EmptyStateView(
-                message:
-                    'Nemate aktivnu pretplatu. Odaberite mentora na početnoj stranici da započnete saradnju.',
-                icon: Icons.assignment_outlined,
-                actionLabel: 'IDI NA POČETNU',
-                onAction: () => Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const HomeScreen()),
-                  (route) => false,
-                ),
-              );
-            case _PlanState.pendingPayment:
-              return EmptyStateView(
-                message: 'Vaša pretplata čeka dovršetak plaćanja.',
-                icon: Icons.payment_rounded,
-                actionLabel: 'IDI NA PRETPLATU',
-                onAction: () => Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-                  (route) => false,
-                ),
-              );
-            case _PlanState.awaitingMentor:
-              return const EmptyStateView(
-                message:
-                    'Vaš zahtjev čeka prihvatanje mentora. Obavijestit ćemo vas čim mentor prihvati saradnju.',
-                icon: Icons.hourglass_top_rounded,
-              );
-            case _PlanState.preparingPlan:
-              return const EmptyStateView(
-                message:
-                    'Mentor priprema vaš personalizovani plan. Vratite se uskoro.',
-                icon: Icons.edit_calendar_rounded,
-              );
-            case _PlanState.hasPlan:
-              return _PlanContent(
-                plan: data.plan!,
-                sessions: data.sessions,
-                selectedDay: _selectedDay,
-                showNutrition: _showNutrition,
-                onSelectDay: (day) => setState(() => _selectedDay = day),
-                onToggleNutrition: (value) =>
-                    setState(() => _showNutrition = value),
-                onCompleteTraining: _completeTraining,
-              );
-          }
-        },
+            final data = snapshot.data!;
+            switch (data.state) {
+              case _PlanState.none:
+                return PullToRefreshFallback(
+                  child: EmptyStateView(
+                    message:
+                        'Nemate aktivnu pretplatu. Odaberite mentora na početnoj stranici da započnete saradnju.',
+                    icon: Icons.assignment_outlined,
+                    actionLabel: 'IDI NA POČETNU',
+                    onAction: () => Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const HomeScreen()),
+                      (route) => false,
+                    ),
+                  ),
+                );
+              case _PlanState.pendingPayment:
+                return PullToRefreshFallback(
+                  child: EmptyStateView(
+                    message: 'Vaša pretplata čeka dovršetak plaćanja.',
+                    icon: Icons.payment_rounded,
+                    actionLabel: 'IDI NA PRETPLATU',
+                    onAction: () => Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                          builder: (_) => const SubscriptionScreen()),
+                      (route) => false,
+                    ),
+                  ),
+                );
+              case _PlanState.awaitingMentor:
+                return const PullToRefreshFallback(
+                  child: EmptyStateView(
+                    message:
+                        'Vaš zahtjev čeka prihvatanje mentora. Obavijestit ćemo vas čim mentor prihvati saradnju.',
+                    icon: Icons.hourglass_top_rounded,
+                  ),
+                );
+              case _PlanState.preparingPlan:
+                return const PullToRefreshFallback(
+                  child: EmptyStateView(
+                    message:
+                        'Mentor priprema vaš personalizovani plan. Vratite se uskoro.',
+                    icon: Icons.edit_calendar_rounded,
+                  ),
+                );
+              case _PlanState.hasPlan:
+                return _PlanContent(
+                  plan: data.plan!,
+                  sessions: data.sessions,
+                  selectedDay: _selectedDay,
+                  showNutrition: _showNutrition,
+                  onSelectDay: (day) => setState(() => _selectedDay = day),
+                  onToggleNutrition: (value) =>
+                      setState(() => _showNutrition = value),
+                  onCompleteTraining: _completeTraining,
+                );
+            }
+          },
+        ),
       ),
     );
   }
@@ -213,6 +242,7 @@ class _PlanContent extends StatelessWidget {
         sessions.where((s) => s.dayOfWeek == selectedDay).toList();
 
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(20),
       children: [
         AppPanel(
@@ -301,7 +331,7 @@ class _PlanContent extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
           ),
           child: Text(
-            'PLAN ZA ${Formatters.dayName(selectedDay).toUpperCase()}',
+            'PLAN ZA ${Formatters.dayNameAccusative(selectedDay).toUpperCase()}',
             textAlign: TextAlign.center,
             style: const TextStyle(
                 color: AppTheme.onAccent, fontWeight: FontWeight.w800),
@@ -363,7 +393,7 @@ class _PlanContent extends StatelessWidget {
                     MaterialPageRoute(
                       builder: (_) => PlanFullTextScreen(
                         title:
-                            'PLAN ZA ${Formatters.dayName(selectedDay).toUpperCase()} - ${showNutrition ? 'ISHRANA' : 'TRENING'}',
+                            'PLAN ZA ${Formatters.dayNameAccusative(selectedDay).toUpperCase()} - ${showNutrition ? 'ISHRANA' : 'TRENING'}',
                         text: showNutrition
                             ? day.nutritionDescription
                             : day.trainingDescription,
@@ -377,24 +407,26 @@ class _PlanContent extends StatelessWidget {
           const SizedBox(height: 20),
           PrimaryButton(
             label: 'ZAVRŠIO SAM TRENING',
-            onPressed: plan.status == 'Published'
+            onPressed: plan.status == 'Published' && plan.canEdit
                 ? () => onCompleteTraining(plan, day)
                 : null,
           ),
-          if (plan.status != 'Published')
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
+          if (plan.status != 'Published' || !plan.canEdit)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
               child: Text(
-                'Evidentiranje treninga je dostupno samo dok je plan objavljen.',
+                !plan.canEdit
+                    ? 'Evidentiranje treninga nije dostupno jer je saradnja s mentorom prekinuta.'
+                    : 'Evidentiranje treninga je dostupno samo dok je plan objavljen.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
               ),
             ),
         ],
         const SizedBox(height: 26),
         SectionHeader(
             title:
-                'MOJI TRENINZI ZA ${Formatters.dayName(selectedDay).toUpperCase()}'),
+                'MOJI TRENINZI ZA ${Formatters.dayNameAccusative(selectedDay).toUpperCase()}'),
         const SizedBox(height: 12),
         if (daySessions.isEmpty)
           const Text('Još nema evidentiranih treninga za ovaj dan.',
@@ -478,9 +510,9 @@ class _CompletionResult {
 }
 
 class _CompleteTrainingDialog extends StatefulWidget {
-  const _CompleteTrainingDialog({required this.dayName});
+  const _CompleteTrainingDialog({required this.dayOfWeek});
 
-  final String dayName;
+  final int dayOfWeek;
 
   @override
   State<_CompleteTrainingDialog> createState() =>
@@ -516,7 +548,9 @@ class _CompleteTrainingDialogState extends State<_CompleteTrainingDialog> {
     return AlertDialog(
       title: Row(
         children: [
-          Expanded(child: Text('Trening za ${widget.dayName}')),
+          Expanded(
+              child: Text(
+                  'Trening za ${Formatters.dayNameAccusative(widget.dayOfWeek)}')),
           IconButton(
             icon: const Icon(Icons.close_rounded),
             onPressed: () => Navigator.of(context).pop(),
@@ -539,6 +573,7 @@ class _CompleteTrainingDialogState extends State<_CompleteTrainingDialog> {
                 max: 10000,
                 label: 'Broj ponavljanja',
                 isInt: true,
+                gender: LabelGender.masculine,
               ),
             ),
             const SizedBox(height: 12),
