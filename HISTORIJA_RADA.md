@@ -245,7 +245,7 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
 1. **Stripe ključevi za ocjenjivača:** ključevi su lokalno u `.env` (29.09.2026.), ali `.env` se ne commituje. Treba odlučiti kako ih ocjenjivač dobija (npr. `.env` u zip-u sa lozinkom, ili prema uputama za predaju).
 2. **Windows Developer Mode** (Settings → System → For developers) — preporučeno ako `flutter run -d windows` javi grešku o symlinkovima (release build je 29.09. uspio i bez njega).
 3. Ručno proći desktop tokove (plan builder, izvještaji PDF/print) u buildanoj aplikaciji.
-4. `git push` na GitHub (repo mora biti javan) — nije urađeno automatski.
+4. ~~`git push` na GitHub~~ — urađeno 30.09.2026. (`origin/master` = `f8dd0d6`, 117 commitova). Provjeriti da je repo `Mirzzo/GoBeyond` javan.
 5. Po želji: `docker rm -f epic_jepsen` (zaostali stari kontejner) i `docker compose down -v` za svježu bazu bez QA podataka (briše i korisnikov testni nalog).
 
 Poznata ograničenja (detaljno u `docs/testing/TEST_REPORT.md`):
