@@ -214,17 +214,44 @@ Commitovi ove sesije (svi na ime Mirza Rujanac): `861a925` checkpoint · `b1d498
 | Grupa | Pre-review | Ocjena | Ishod |
 |---|---|---|---|
 | E1 email-consumer (4. runda) | 8.5 | **8.5/10** | PRIHVAĆENO. Supresija pokriva poddomene i IDN oblike (tačka se skida tek nakon IDN konverzije). Redelivery tokom slanja ili neposredno nakon njega ne šalje duplikat (gate + zapis prije oslobađanja ključa, test kroz `Worker.HandleAsync`). Email je `multipart/alternative`: text/plain base64 sa CRLF, HTML quoted-printable, `Message-ID`. Consumer se sam ponovo poveže nakon otkazivanja od brokera. Prazan email ide u DLQ. 458 testova, 18 atomičnih commitova. Za završni task ostaju Unicode oblici `@`/`>` (14 zaobilaženja u 1,5 mil. generisanih adresa; SMTP server bi takvu adresu odbio) i zastarjela rečenica u `SmtpOptions` |
+| B5 lozinke/trim/tekstovi (Opus) | 9 | **9/10** | PRIHVAĆENO. Promjene lozinke, admin reset, blokiranje, brisanje i izmjena korisnika rade nad zaključanim redom korisnika. Tokeni se opozivaju pojedinačno, pa nema deadlocka sa refresh-om. Deadlock ili lock timeout vraća 400 umjesto 500. Oko 400 race rundi na SQL Serveru bez ijednog 500 i bez izgubljenog reseta. Ime i prezime te nazivi šifarnika trimuju se prije validacije. Razlog odbijanja mentora ima tačku, ocjena "(4,5)". 419 testova |
+| B6 plaćanja/obavijesti (Opus) | 9 | **9/10** | PRIHVAĆENO. Cijena pretplate je naplaćeni iznos. Novi status uplate `Disputed` (povrat osporene naplate se ne ponavlja, zahtjev se može zatvoriti). NewMessage pamti pošiljaoca (migracija `AddNotificationSender`, provjerena na kopiji stvarne baze). Plan za neplaćenu pretplatu vraća 404. Desktop tekst otkazivanja neplaćene pretplate ispravljen. 390 testova + desktop 78 |
 | M1 mobile (dorada) | 8.6 | **8.5/10** | PRIHVAĆENO. Svih 26 E2E nalaza je riješeno. Gramatika validatora je ispravna ("su obavezni", "moraju"). Chat polling se pauzira u pozadini, a zastarjeli odgovori se odbacuju. Material/Cupertino su na bosanskom. Pretplata ima uredne akcije. Osvježavanje ne briše sadržaj. Testovi stvarno čuvaju popravke (36/47 mutacija pada). 100 testova, 15 atomičnih commitova, provjereno na emulatoru. Za završni task ostaju test za ključ mjeseca u Historiji treninga, tekst praznog rezultata ispod tastature i hint "prekinuta"/"završena" |
+
+### Deploy i završni E2E (30.09.2026.)
+- Master nakon spajanja E1, M1, B5 i B6: backend 521/521, desktop 78/78, mobile 100/100. Ugovor v1.8.
+- `docker compose up -d --build`: API i novi email-consumer (volume `gobeyond-email-consumer-data` za zapis poslanih poruka). Migracija `AddNotificationSender` je primijenjena, a korisnikov nalog i podaci su netaknuti.
+- **Završni E2E na emulatoru (korisnikov nalog): 29/29 pass, bez novih nalaza.**
+  - Sesija je preživjela deploy bez ponovne prijave.
+  - Sve mobilne popravke su potvrđene na stvarnom UI-ju.
+  - Chat prima poruku mentora za 9 s dok je otvoren i nadoknadi je nakon povratka iz pozadine. NewMessage "Nova poruka: Haris Mehmedović" se označava pročitanom.
+  - Odbijena kartica 9995 ne pravi dodatnu uplatu; nakon zatvaranja sheet-a aplikacija prikazuje poruku na bosanskom. Produženje karticom 4242 pomjerilo je `endDate` na 30.12.2026.
+  - Mentor je izmijenio plan (verzija 5).
+- **Email (NOT-04):** "Pretplata je produžena" i "Vaš trening plan je ažuriran" poslani su jednom, u novom multipart (text + HTML) formatu. **Korisnik potvrdio: oba su stigla u Inbox (ne više u Spam) i uredno su formatirana.**
+- Stanje korisnikovog naloga: aktivna pretplata do 30.12.2026., 4 uspješne uplate (test mod), plan v5, 2 nepročitane obavijesti.
+
+### Završne sitnice (glavni agent, prag > 8)
+| Grupa | Pre-review | Ocjena | Ishod |
+|---|---|---|---|
+| F1B backend/desktop/email | 9 | **9/10** | PRIHVAĆENO. Host primaoca koji nakon IDN konverzije nije ispravno DNS ime se nikad ne šalje: 0 zaobilaženja u 1,55 mil. adresa (ranije 14), a stroži probe od 5,4 mil. adresa nije našao grešku ni u jednom smjeru. Admin vidi osporene uplate: `AdminSubscription.payments`, `warning` kod otkazivanja i brisanja korisnika (`DELETE /api/admin/users/{id}` sada `200` `{ message, warning }`, dokumentovan izuzetak), desktop "Osporeno" i dijalog "Uplata nije vraćena". Poruka mentoru pri odbijanju navodi stvarni ishod povrata. 401 tekst ujednačen. Testovi za CreatedAtTicks i redoslijed zaključavanja pri brisanju. Backend 557, desktop 87 |
+| F1M mobile | 9.2 | **9/10** | PRIHVAĆENO. "Osporeno" za status uplate. Stanja (prazno, greška, učitavanje) ostaju vidljiva iznad tastature. Hint "saradnja je završena". Test za ključ mjeseca i testovi za sporedne izmjene (28 mutacija pada). Provjereno na emulatoru. Mobile 116 |
+- Konačni master: backend **557/557**, desktop **87/87**, mobile **116/116**, oba `flutter analyze` čista. Ugovor **v1.8**.
+- Stack je ponovo rebuildan (API health, admin login, email-consumer healthy). Uživo potvrđeno: QA uplata sa osporenom naplatom prešla je u `Disputed` bez daljih pokušaja povrata, a admin otkazivanje takvog zahtjeva vraća upozorenje "Uplata od 39,99 USD je osporena kod banke klijenta i nije vraćena; ...".
+- Izvještaj: `docs/testing/TEST_REPORT.md`.
+- Čišćenje: uklonjeni su svi fix worktree-ovi i grane (svaki commit je provjeren da je u masteru), zaostali stash, testne baze i queue-ovi agenata. U razvojnoj bazi ostaju QA nalozi i njihovi podaci; QA mentori su blokirani ili obrisani.
 
 ## Sljedeći koraci (korisnik)
 
 1. **Stripe ključevi za ocjenjivača:** ključevi su lokalno u `.env` (29.09.2026.), ali `.env` se ne commituje. Treba odlučiti kako ih ocjenjivač dobija (npr. `.env` u zip-u sa lozinkom, ili prema uputama za predaju).
 2. **Windows Developer Mode** (Settings → System → For developers) — preporučeno ako `flutter run -d windows` javi grešku o symlinkovima (release build je 29.09. uspio i bez njega).
-3. **Android emulator test** mobilne aplikacije (na ovoj mašini nema Android SDK-a): posebno Stripe PaymentSheet (flutter_stripe 13.1), upload slika, navigacija.
-4. Ručno proći desktop tokove (plan builder, izvještaji PDF/print) u buildanoj aplikaciji.
-5. `git push` na GitHub (repo mora biti javan) — nije urađeno automatski.
+3. Ručno proći desktop tokove (plan builder, izvještaji PDF/print) u buildanoj aplikaciji.
+4. `git push` na GitHub (repo mora biti javan) — nije urađeno automatski.
+5. Po želji: `docker rm -f epic_jepsen` (zaostali stari kontejner) i `docker compose down -v` za svježu bazu bez QA podataka (briše i korisnikov testni nalog).
 
-Poznata ograničenja: Stripe tokovi (uspješno plaćanje, refund, webhook) testirani samo unit testovima s lažnim gatewayem, ne protiv pravog Stripe-a; podsjetnik pred istek i automatski Expired nisu viđeni live (implementirani i pokriveni kodom).
+Poznata ograničenja (detaljno u `docs/testing/TEST_REPORT.md`):
+- tekstovi unutar nativnog Stripe PaymentSheet-a su na jeziku uređaja;
+- webhook sa ispravnim potpisom nije testiran na glavnom stacku (nema webhook secret-a; potvrda ide preko `/confirm` i usklađivanja);
+- osporene naplate se otkrivaju tek pri pokušaju povrata.
 
 ## Kako nastaviti
 
